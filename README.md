@@ -20,8 +20,8 @@ Currently this Arduino library is compatible with Teensy hardware only. ESP32 su
 
 ### Example
 
-An example ino file for Arduino IDE is located in the main AgIsoStack++ repo. [Starting from here](https://github.com/Open-Agriculture/AgIsoStack-plus-plus/tree/main/examples/arduino_example) is recommended!
-The example sketch loads a VT object pool to a virtual terminal, as long as your teensy is connected to an ISO11783 CAN network using the Teensy's CAN 1 pins and compatible CAN transceiver.
+Examples are located [here](https://github.com/Open-Agriculture/AgIsoStack-Arduino/tree/main/examples).
+The virtual terminal example sketch is a good starting point, and loads a VT object pool to a virtual terminal, as long as your teensy is connected to an ISO11783 CAN network using the Teensy's CAN 1 pins and compatible CAN transceiver.
 
 ### Troubleshooting
 

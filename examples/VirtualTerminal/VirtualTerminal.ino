@@ -12,7 +12,7 @@ std::shared_ptr<void> softKeyListener = nullptr;
 std::shared_ptr<void> buttonListener = nullptr;
 
 // A log sink for the CAN stack
-class CustomLogger : public isobus::CANStackLogger
+class CustomLogger : public CANStackLogger
 {
 public:
 	void sink_CAN_stack_log(CANStackLogger::LoggingLevel level, const std::string &text) override
@@ -45,7 +45,7 @@ public:
 
 			case LoggingLevel::Critical:
 			{
-        Serial.print("[Critical]: ");
+        		Serial.print("[Critical]: ");
 			}
 			break;
 		}

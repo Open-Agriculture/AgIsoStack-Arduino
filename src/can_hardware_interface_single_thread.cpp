@@ -12,6 +12,7 @@
 #include "to_string.hpp"
 
 #include <algorithm>
+#include <limits>
 
 namespace isobus
 {
