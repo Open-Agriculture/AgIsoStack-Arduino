@@ -1,0 +1,378 @@
+//================================================================================================
+/// @file can_network_manager.hpp
+///
+/// @brief The main class that manages the ISOBUS stack including: callbacks, Name to Address
+/// management, making control functions, and driving the various protocols.
+/// @author Adrian Del Grosso
+/// @author Daan Steenbergen
+///
+/// @copyright 2022 Adrian Del Grosso
+//================================================================================================
+
+#ifndef CAN_NETWORK_MANAGER_HPP
+#define CAN_NETWORK_MANAGER_HPP
+
+#include "can_address_claim_state_machine.hpp"
+#include "can_badge.hpp"
+#include "can_callbacks.hpp"
+#include "can_constants.hpp"
+#include "can_extended_transport_protocol.hpp"
+#include "can_identifier.hpp"
+#include "can_internal_control_function.hpp"
+#include "can_message.hpp"
+#include "can_message_frame.hpp"
+#include "can_network_configuration.hpp"
+#include "can_transport_protocol.hpp"
+#include "nmea2000_fast_packet_protocol.hpp"
+
+#include <array>
+#include <deque>
+#include <list>
+#include <memory>
+
+#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
+#include <mutex>
+#endif
+
+/// @brief This namespace encompasses all of the ISO11783 stack's functionality to reduce global namespace pollution
+namespace isobus
+{
+	class PartneredControlFunction;
+
+	//================================================================================================
+	/// @class CANNetworkManager
+	///
+	/// @brief The main CAN network manager object, handles protocol management and updating other
+	/// stack components. Provides an interface for sending CAN messages.
+	//================================================================================================
+	class CANNetworkManager
+	{
+	public:
+		static CANNetworkManager CANNetwork; ///< Static singleton of the one network manager. Use this to access stack functionality.
+
+		/// @brief Initializer function for the network manager
+		void initialize();
+
+		/// @brief Called only by the stack, returns a control function based on certain port and address
+		/// @param[in] channelIndex CAN Channel index of the control function
+		/// @param[in] address Address of the control function
+		/// @returns A control function that matches the parameters, or nullptr if no match was found
+		std::shared_ptr<ControlFunction> get_control_function(std::uint8_t channelIndex, std::uint8_t address, CANLibBadge<AddressClaimStateMachine>) const;
+
+		/// @brief This is how you register a callback for any PGN destined for the global address (0xFF)
+		/// @param[in] parameterGroupNumber The PGN you want to register for
+		/// @param[in] callback The callback that will be called when parameterGroupNumber is received from the global address (0xFF)
+		/// @param[in] parent A generic context variable that helps identify what object the callback is destined for. Can be nullptr if you don't want to use it.
+		void add_global_parameter_group_number_callback(std::uint32_t parameterGroupNumber, CANLibCallback callback, void *parent);
+
+		/// @brief This is how you remove a callback for any PGN destined for the global address (0xFF)
+		/// @param[in] parameterGroupNumber The PGN of the callback to remove
+		/// @param[in] callback The callback that will be removed
+		/// @param[in] parent A generic context variable that helps identify what object the callback was destined for
+		void remove_global_parameter_group_number_callback(std::uint32_t parameterGroupNumber, CANLibCallback callback, void *parent);
+
+		/// @brief Returns the number of global PGN callbacks that have been registered with the network manager
+		/// @returns The number of global PGN callbacks that have been registered with the network manager
+		std::size_t get_number_global_parameter_group_number_callbacks() const;
+
+		/// @brief Registers a callback for ANY control function sending the associated PGN
+		/// @param[in] parameterGroupNumber The PGN you want to register for
+		/// @param[in] callback The callback that will be called when parameterGroupNumber is received from any control function
+		/// @param[in] parent A generic context variable that helps identify what object the callback is destined for. Can be nullptr if you don't want to use it.
+		void add_any_control_function_parameter_group_number_callback(std::uint32_t parameterGroupNumber, CANLibCallback callback, void *parent);
+
+		/// @brief This is how you remove a callback added with add_any_control_function_parameter_group_number_callback
+		/// @param[in] parameterGroupNumber The PGN of the callback to remove
+		/// @param[in] callback The callback that will be removed
+		/// @param[in] parent A generic context variable that helps identify what object the callback was destined for
+		void remove_any_control_function_parameter_group_number_callback(std::uint32_t parameterGroupNumber, CANLibCallback callback, void *parent);
+
+		/// @brief Returns an internal control function if the passed-in control function is an internal type
+		/// @returns An internal control function casted from the passed in control function
+		std::shared_ptr<InternalControlFunction> get_internal_control_function(std::shared_ptr<ControlFunction> controlFunction);
+
+		/// @brief Returns an estimated busload between 0.0f and 100.0f
+		/// @details This calculates busload over a 1 second window.
+		/// @note This function averages between best and worst case bit-stuffing.
+		/// This may be more or less aggressive than the actual amount of bit stuffing. Knowing
+		/// the actual amount of bit stuffing is impossible, so this should only be used as an estimate.
+		/// @param[in] canChannel The channel to estimate the bus load for
+		/// @returns Estimated busload over the last 1 second
+		float get_estimated_busload(std::uint8_t canChannel);
+
+		/// @brief This is the main way to send a CAN message of any length.
+		/// @details This function will automatically choose an appropriate transport protocol if needed.
+		/// If you don't specify a destination (or use nullptr) you message will be sent as a broadcast
+		/// if it is valid to do so.
+		/// You can also get a callback on success or failure of the transmit.
+		/// @returns `true` if the message was sent, otherwise `false`
+		bool send_can_message(std::uint32_t parameterGroupNumber,
+		                      const std::uint8_t *dataBuffer,
+		                      std::uint32_t dataLength,
+		                      std::shared_ptr<InternalControlFunction> sourceControlFunction,
+		                      std::shared_ptr<ControlFunction> destinationControlFunction = nullptr,
+		                      CANIdentifier::CANPriority priority = CANIdentifier::CANPriority::PriorityDefault6,
+		                      TransmitCompleteCallback txCompleteCallback = nullptr,
+		                      void *parentPointer = nullptr,
+		                      DataChunkCallback frameChunkCallback = nullptr);
+
+		/// @brief This is the main function used by the stack to receive CAN messages and add them to a queue.
+		/// @details This function is called by the stack itself when you call can_lib_process_rx_message.
+		/// @param[in] message The message to be received
+		void receive_can_message(const CANMessage &message);
+
+		/// @brief The main update function for the network manager. Updates all protocols.
+		void update();
+
+		/// @brief Process the CAN Rx queue
+		/// @param[in] rxFrame Frame to process
+		static void process_receive_can_message_frame(const CANMessageFrame &rxFrame);
+
+		/// @brief Used to tell the network manager when frames are emitted on the bus, so that they can be
+		/// added to the internal bus load calculations.
+		/// @param[in] txFrame The frame that was just emitted onto the bus
+		static void process_transmitted_can_message_frame(const CANMessageFrame &txFrame);
+
+		/// @brief Informs the network manager that a control function object has been destroyed, so that it can be purged from the network manager
+		/// @param[in] controlFunction The control function that was destroyed
+		void on_control_function_destroyed(std::shared_ptr<ControlFunction> controlFunction, CANLibBadge<ControlFunction>);
+
+		/// @brief Informs the network manager that a control function object has been created, so that it can be added to the network manager
+		/// @param[in] controlFunction The control function that was created
+		void on_control_function_created(std::shared_ptr<ControlFunction> controlFunction, CANLibBadge<ControlFunction>);
+
+		/// @brief Informs the network manager that a control function object has been created, so that it can be added to the network manager
+		/// @param[in] controlFunction The control function that was created
+		void on_control_function_created(std::shared_ptr<ControlFunction> controlFunction, CANLibBadge<InternalControlFunction>);
+
+		/// @brief Informs the network manager that a control function object has been created, so that it can be added to the network manager
+		/// @param[in] controlFunction The control function that was created
+		void on_control_function_created(std::shared_ptr<ControlFunction> controlFunction, CANLibBadge<PartneredControlFunction>);
+
+		/// @brief Use this to get a callback when a control function goes online or offline.
+		/// This could be useful if you want event driven notifications for when your partners are disconnected from the bus.
+		/// @param[in] callback The callback you want to be called when the any control function changes state
+		void add_control_function_status_change_callback(ControlFunctionStateCallback callback);
+
+		/// @brief Used to remove callbacks added with add_control_function_status_change_callback
+		/// @param[in] callback The callback you want to remove
+		void remove_control_function_status_change_callback(ControlFunctionStateCallback callback);
+
+		/// @brief Gets all the internal control functions that are currently registered in the network manager
+		/// @returns A list of all the internal control functions
+		const std::list<std::shared_ptr<InternalControlFunction>> &get_internal_control_functions() const;
+
+		/// @brief Gets all the partnered control functions that are currently registered in the network manager
+		/// @returns A list of all the partnered control functions
+		const std::list<std::shared_ptr<PartneredControlFunction>> &get_partnered_control_functions() const;
+
+		/// @brief Returns the class instance of the NMEA2k fast packet protocol.
+		/// Use this to register for FP multipacket messages
+		/// @returns The class instance of the NMEA2k fast packet protocol.
+		FastPacketProtocol &get_fast_packet_protocol();
+
+		/// @brief Returns the configuration of this network manager
+		/// @returns The configuration class for this network manager
+		CANNetworkConfiguration &get_configuration();
+
+	protected:
+		// Using protected region to allow protocols use of special functions from the network manager
+		friend class AddressClaimStateMachine; ///< Allows the network manager to work closely with the address claiming process
+		friend class ExtendedTransportProtocolManager; ///< Allows the network manager to access the ETP manager
+		friend class TransportProtocolManager; ///< Allows the network manager to work closely with the transport protocol manager object
+		friend class DiagnosticProtocol; ///< Allows the diagnostic protocol to access the protected functions on the network manager
+		friend class ParameterGroupNumberRequestProtocol; ///< Allows the PGN request protocol to access the network manager protected functions
+		friend class FastPacketProtocol; ///< Allows the FP protocol to access the network manager protected functions
+		friend class CANLibProtocol;
+
+		/// @brief Adds a PGN callback for a protocol class
+		/// @param[in] parameterGroupNumber The PGN to register for
+		/// @param[in] callback The callback to call when the PGN is received
+		/// @param[in] parentPointer A generic context variable that helps identify what object the callback was destined for
+		/// @returns `true` if the callback was added, otherwise `false`
+		bool add_protocol_parameter_group_number_callback(std::uint32_t parameterGroupNumber, CANLibCallback callback, void *parentPointer);
+
+		/// @brief Removes a PGN callback for a protocol class
+		/// @param[in] parameterGroupNumber The PGN to register for
+		/// @param[in] callback The callback to call when the PGN is received
+		/// @param[in] parentPointer A generic context variable that helps identify what object the callback was destined for
+		/// @returns `true` if the callback was removed, otherwise `false`
+		bool remove_protocol_parameter_group_number_callback(std::uint32_t parameterGroupNumber, CANLibCallback callback, void *parentPointer);
+
+		/// @brief Sends a CAN message using raw addresses. Used only by the stack.
+		/// @param[in] portIndex The CAN channel index to send the message from
+		/// @param[in] sourceAddress The source address to send the CAN message from
+		/// @param[in] destAddress The destination address to send the message to
+		/// @param[in] parameterGroupNumber The PGN to use when sending the message
+		/// @param[in] priority The CAN priority of the message being sent
+		/// @param[in] data A pointer to the data buffer to send from
+		/// @param[in] size The size of the message to send
+		/// @returns `true` if the message was sent, otherwise `false`
+		bool send_can_message_raw(std::uint32_t portIndex,
+		                          std::uint8_t sourceAddress,
+		                          std::uint8_t destAddress,
+		                          std::uint32_t parameterGroupNumber,
+		                          std::uint8_t priority,
+		                          const void *data,
+		                          std::uint32_t size,
+		                          CANLibBadge<AddressClaimStateMachine>) const;
+
+		/// @brief Processes completed protocol messages. Causes PGN callbacks to trigger.
+		/// @param[in] message The completed protocol message
+		void protocol_message_callback(const CANMessage &message);
+
+		std::vector<CANLibProtocol *> protocolList; ///< A list of all created protocol classes
+
+	private:
+		/// @brief Constructor for the network manager. Sets default values for members
+		CANNetworkManager();
+
+		/// @brief Updates the internal address table based on a received CAN message
+		/// @param[in] message A message being received by the stack
+		void update_address_table(const CANMessage &message);
+
+		/// @brief Updates the internal address table based on updates to internal cfs addresses
+		void update_internal_cfs();
+
+		/// @brief Processes a CAN message's contribution to the current busload
+		/// @param[in] channelIndex The CAN channel index associated to the message being processed
+		/// @param[in] numberOfBitsProcessed The number of bits to add to the busload calculation
+		void update_busload(std::uint8_t channelIndex, std::uint32_t numberOfBitsProcessed);
+
+		/// @brief Updates the stored bit accumulators for calculating the bus load over a multiple sample windows
+		void update_busload_history();
+
+		/// @brief Creates new control function classes based on the frames coming in from the bus
+		/// @param[in] rxFrame Raw frames coming in from the bus
+		void update_control_functions(const CANMessageFrame &rxFrame);
+
+		/// @brief Checks if new partners have been created and matches them to existing control functions
+		void update_new_partners();
+
+		/// @brief Builds a CAN frame from a frame's discrete components
+		/// @param[in] portIndex The CAN channel index of the CAN message being processed
+		/// @param[in] sourceAddress The source address to send the CAN message from
+		/// @param[in] destAddress The destination address to send the message to
+		/// @param[in] parameterGroupNumber The PGN to use when sending the message
+		/// @param[in] priority The CAN priority of the message being sent
+		/// @param[in] data A pointer to the data buffer to send from
+		/// @param[in] size The size of the message to send
+		/// @returns The constructed frame based on the inputs
+		CANMessageFrame construct_frame(std::uint32_t portIndex,
+		                                std::uint8_t sourceAddress,
+		                                std::uint8_t destAddress,
+		                                std::uint32_t parameterGroupNumber,
+		                                std::uint8_t priority,
+		                                const void *data,
+		                                std::uint32_t size) const;
+
+		/// @brief Returns a control function based on a CAN address and channel index
+		/// @param[in] channelIndex The CAN channel index of the CAN message being processed
+		/// @param[in] address The CAN address associated with a control function
+		/// @returns A control function matching the address and CAN port passed in
+		std::shared_ptr<ControlFunction> get_control_function(std::uint8_t channelIndex, std::uint8_t address) const;
+
+		/// @brief Gets a message from the Rx Queue.
+		/// @note This will only ever get an 8 byte message. Long messages are handled elsewhere.
+		/// @returns The can message that was at the front of the buffer
+		CANMessage get_next_can_message_from_rx_queue();
+
+		/// @brief Returns the number of messages in the rx queue that need to be processed
+		/// @returns The number of messages in the rx queue that need to be processed
+		std::size_t get_number_can_messages_in_rx_queue();
+
+		/// @brief Informs the network manager that a control function object has been created
+		/// @param[in] controlFunction The control function that was created
+		void on_control_function_created(std::shared_ptr<ControlFunction> controlFunction);
+
+		/// @brief Processes a can message for callbacks added with add_any_control_function_parameter_group_number_callback
+		/// @param[in] currentMessage The message to process
+		void process_any_control_function_pgn_callbacks(const CANMessage &currentMessage);
+
+		/// @brief Checks the control function state callback list to see if we need to call
+		/// a control function state callback.
+		/// @param[in] controlFunction The controlFunction whose state has changed
+		/// @param[in] state The new state of the control function
+		void process_control_function_state_change_callback(std::shared_ptr<ControlFunction> controlFunction, ControlFunctionState state);
+
+		/// @brief Processes a can message for callbacks added with add_protocol_parameter_group_number_callback
+		/// @param[in] currentMessage The message to process
+		void process_protocol_pgn_callbacks(const CANMessage &currentMessage);
+
+		/// @brief Matches a CAN message to any matching PGN callback, and calls that callback
+		/// @param[in] message A pointer to a CAN message to be processed
+		void process_can_message_for_global_and_partner_callbacks(const CANMessage &message);
+
+		/// @brief Processes a CAN message to see if it's a commanded address message, and
+		/// if it is, it attempts to set the relevant CF's address to the new value.
+		/// @note Changing the address will resend the address claim message if
+		/// the target was an internal control function.
+		/// @param[in] message The message to process
+		void process_can_message_for_commanded_address(const CANMessage &message);
+
+		/// @brief Processes the internal receive message queue
+		void process_rx_messages();
+
+		/// @brief Checks to see if any control function didn't claim during a round of
+		/// address claiming and removes it if needed.
+		void prune_inactive_control_functions();
+
+		/// @brief Sends a CAN message using raw addresses. Used only by the stack.
+		/// @param[in] portIndex The CAN channel index to send the message from
+		/// @param[in] sourceAddress The source address to send the CAN message from
+		/// @param[in] destAddress The destination address to send the message to
+		/// @param[in] parameterGroupNumber The PGN to use when sending the message
+		/// @param[in] priority The CAN priority of the message being sent
+		/// @param[in] data A pointer to the data buffer to send from
+		/// @param[in] size The size of the message to send
+		/// @returns `true` if the message was sent, otherwise `false`
+		bool send_can_message_raw(std::uint32_t portIndex,
+		                          std::uint8_t sourceAddress,
+		                          std::uint8_t destAddress,
+		                          std::uint32_t parameterGroupNumber,
+		                          std::uint8_t priority,
+		                          const void *data,
+		                          std::uint32_t size) const;
+
+		/// @brief Gets a PGN callback for the global address by index
+		/// @param[in] index The index of the callback to get
+		/// @returns A structure containing the global PGN callback data
+		ParameterGroupNumberCallbackData get_global_parameter_group_number_callback(std::uint32_t index) const;
+
+		static constexpr std::uint32_t BUSLOAD_SAMPLE_WINDOW_MS = 1000; ///< Using a 1s window to average the bus load, otherwise it's very erratic
+		static constexpr std::uint32_t BUSLOAD_UPDATE_FREQUENCY_MS = 100; ///< Bus load bit accumulation happens over a 100ms window
+
+		CANNetworkConfiguration configuration; ///< The configuration for this network manager
+		ExtendedTransportProtocolManager extendedTransportProtocol; ///< Static instance of the protocol manager
+		FastPacketProtocol fastPacketProtocol; ///< Instance of the fast packet protocol
+		TransportProtocolManager transportProtocol; ///< Static instance of the transport protocol manager
+
+		std::array<std::deque<std::uint32_t>, CAN_PORT_MAXIMUM> busloadMessageBitsHistory; ///< Stores the approximate number of bits processed on each channel over multiple previous time windows
+		std::array<std::uint32_t, CAN_PORT_MAXIMUM> currentBusloadBitAccumulator; ///< Accumulates the approximate number of bits processed on each channel during the current time window
+		std::array<std::uint32_t, CAN_PORT_MAXIMUM> lastAddressClaimRequestTimestamp_ms; ///< Stores timestamps for when the last request for the address claim PGN was received. Used to prune stale CFs.
+
+		std::array<std::array<std::shared_ptr<ControlFunction>, NULL_CAN_ADDRESS>, CAN_PORT_MAXIMUM> controlFunctionTable; ///< Table to maintain address to NAME mappings
+		std::list<std::shared_ptr<ControlFunction>> inactiveControlFunctions; ///< A list of the control function that currently don't have a valid address
+		std::list<std::shared_ptr<InternalControlFunction>> internalControlFunctions; ///< A list of the internal control functions
+		std::list<std::shared_ptr<PartneredControlFunction>> partneredControlFunctions; ///< A list of the partnered control functions
+
+		std::list<ParameterGroupNumberCallbackData> protocolPGNCallbacks; ///< A list of PGN callback registered by CAN protocols
+		std::list<CANMessage> receiveMessageList; ///< A queue of Rx messages to process
+		std::list<ControlFunctionStateCallback> controlFunctionStateCallbacks; ///< List of all control function state callbacks
+		std::vector<ParameterGroupNumberCallbackData> globalParameterGroupNumberCallbacks; ///< A list of all global PGN callbacks
+		std::vector<ParameterGroupNumberCallbackData> anyControlFunctionParameterGroupNumberCallbacks; ///< A list of all global PGN callbacks
+#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
+		std::mutex receiveMessageMutex; ///< A mutex for receive messages thread safety
+		std::mutex protocolPGNCallbacksMutex; ///< A mutex for PGN callback thread safety
+		std::mutex anyControlFunctionCallbacksMutex; ///< Mutex to protect the "any CF" callbacks
+		std::mutex busloadUpdateMutex; ///< A mutex that protects the busload metrics since we calculate it on our own thread
+		std::mutex controlFunctionStatusCallbacksMutex; ///< A Mutex that protects access to the control function status callback list
+#endif
+		std::uint32_t busloadUpdateTimestamp_ms = 0; ///< Tracks a time window for determining approximate busload
+		std::uint32_t updateTimestamp_ms = 0; ///< Keeps track of the last time the CAN stack was update in milliseconds
+		bool initialized = false; ///< True if the network manager has been initialized by the update function
+	};
+
+} // namespace isobus
+
+#endif // CAN_NETWORK_MANAGER_HPP
