@@ -1,5 +1,5 @@
 /*******************************************************************************
-** @file        isobus.hpp
+** @file        AgIsoStack.hpp
 ** @author      Automatic Code Generation
 ** @date        September 09, 2023 at 11:11:41
 ** @brief       Includes all important files in the AgIsoStack library.
@@ -7,8 +7,8 @@
 ** Copyright 2023 The AgIsoStack++ Developers
 *******************************************************************************/
 
-#ifndef ISOBUS_HPP
-#define ISOBUS_HPP
+#ifndef AG_ISO_STACK_HPP
+#define AG_ISO_STACK_HPP
 
 #include <can_address_claim_state_machine.hpp>
 #include <can_badge.hpp>
@@ -58,4 +58,4 @@
 #include <system_timing.hpp>
 #include <to_string.hpp>
 
-#endif // ISOBUS_HPP
+#endif // AG_ISO_STACK_HPP
