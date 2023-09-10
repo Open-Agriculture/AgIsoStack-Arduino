@@ -1,7 +1,9 @@
 # AgIsoStack-Arduino
 AgIsoStack is a free ISOBUS (ISO11783) and SAE J1939 compatible CAN stack that makes communication on off-highway vehicle CAN networks easy.
 
-Currently this library is compatible with Teensy hardware only. ESP32 support will likely be added at some point, but for now PlatformIO + ESP-IDF is supported for ESP32 platforms via the [main repo](https://github.com/Open-Agriculture/AgIsoStack-plus-plus).
+This library is based on the larger [AgIsoStack++ project](https://github.com/Open-Agriculture/AgIsoStack-plus-plus), which provides a CMake build system and additional supported CAN hardware.
+
+Currently this Arduino library is compatible with Teensy hardware only. ESP32 support will likely be added at some point, but for now PlatformIO + ESP-IDF is supported for ESP32 platforms via the [main repo](https://github.com/Open-Agriculture/AgIsoStack-plus-plus).
 
 ### Features
 
