@@ -5,3 +5,6 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - uses: arduino/arduino-lint-action@v1
+        with:
+          library-manager: update
+          project-type: library
