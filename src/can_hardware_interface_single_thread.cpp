@@ -29,7 +29,7 @@ namespace isobus
 		return CANHardwareInterface::transmit_can_frame(frame);
 	}
 
-	bool CANHardwareInterface::set_number_of_can_channels(uint8_t value)
+	bool CANHardwareInterface::set_number_of_can_channels(std::uint8_t value)
 	{
 		if (started)
 		{
@@ -39,7 +39,7 @@ namespace isobus
 
 		while (value > hardwareChannels.size())
 		{
-			hardwareChannels.push_back(std::make_unique<CANHardware>());
+			hardwareChannels.emplace_back(new CANHardware());
 			hardwareChannels.back()->frameHandler = nullptr;
 		}
 		while (value < hardwareChannels.size())
@@ -248,7 +248,7 @@ namespace isobus
 			}
 			else
 			{
-				isobus::CANStackLogger::CAN_stack_log(isobus::CANStackLogger::LoggingLevel::Critical, "[CAN Rx Thread]: CAN Channel " + isobus::to_string(channelIndex) + " appears to be invalid.");
+				isobus::CANStackLogger::critical("[CAN Rx Thread]: CAN Channel " + isobus::to_string(channelIndex) + " appears to be invalid.");
 			}
 		}
 	}

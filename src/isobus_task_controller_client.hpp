@@ -211,6 +211,10 @@ namespace isobus
 		               bool reportToTCSupportsPeerControlAssignment,
 		               bool reportToTCSupportsImplementSectionControl);
 
+		/// @brief Calling this function will reset the task controller client's connection
+		/// with the TC server, and cause it to reconnect after a short delay.
+		void restart();
+
 		// Calling this will stop the worker thread if it exists
 		/// @brief Terminates the client and joins the worker thread if applicable
 		void terminate();
@@ -304,12 +308,42 @@ namespace isobus
 		/// a value to the TC server.
 		/// @details If you provide on-change triggers in your DDOP, this is how you can request the TC client
 		/// to update the TC server on the current value of your process data variables.
+		/// @param[in] elementNumber The element number of the process data variable that changed
+		/// @param[in] DDI The DDI of the process data variable that changed
 		void on_value_changed_trigger(std::uint16_t elementNumber, std::uint16_t DDI);
 
 		/// @brief Sends a broadcast request to TCs to identify themseleves.
 		/// @details Upon receipt of this message, the TC shall display, for a period of 3 s, the TC Number
 		/// @returns `true` if the message was sent, otherwise `false`
 		bool request_task_controller_identification() const;
+
+		/// @brief If the TC client is connected to a TC, calling this function will
+		/// cause the TC client interface to delete the currently active DDOP, reupload it,
+		/// then reactivate it using the pool passed into the parameter of this function.
+		/// This process is faster than restarting the whole interface, and you have to
+		/// call it if you change certain things in your DDOP at runtime after the DDOP has already been activated.
+		/// @param[in] binaryDDOP The updated device descriptor object pool to upload to the TC
+		/// @returns true if the interface accepted the command to reupload the pool, or false if the command cannot be handled right now
+		bool reupload_device_descriptor_object_pool(std::shared_ptr<std::vector<std::uint8_t>> binaryDDOP);
+
+		/// @brief If the TC client is connected to a TC, calling this function will
+		/// cause the TC client interface to delete the currently active DDOP, reupload it,
+		/// then reactivate it using the pool passed into the parameter of this function.
+		/// This process is faster than restarting the whole interface, and you have to
+		/// call it if you change certain things in your DDOP at runtime after the DDOP has already been activated.
+		/// @param[in] binaryDDOP The updated device descriptor object pool to upload to the TC
+		/// @param[in] DDOPSize The number of bytes in the binary DDOP that will be uploaded
+		/// @returns true if the interface accepted the command to reupload the pool, or false if the command cannot be handled right now
+		bool reupload_device_descriptor_object_pool(std::uint8_t const *binaryDDOP, std::uint32_t DDOPSize);
+
+		/// @brief If the TC client is connected to a TC, calling this function will
+		/// cause the TC client interface to delete the currently active DDOP, reupload it,
+		/// then reactivate it using the pool passed into the parameter of this function.
+		/// This process is faster than restarting the whole interface, and you have to
+		/// call it if you change certain things in your DDOP at runtime after the DDOP has already been activated.
+		/// @param[in] DDOP The updated device descriptor object pool to upload to the TC
+		/// @returns true if the interface accepted the command to reupload the pool, or false if the command cannot be handled right now
+		bool reupload_device_descriptor_object_pool(std::shared_ptr<DeviceDescriptorObjectPool> DDOP);
 
 		/// @brief The cyclic update function for this interface.
 		/// @note This function may be called by the TC worker thread if you called
@@ -406,6 +440,12 @@ namespace isobus
 		static void process_rx_message(const CANMessage &message, void *parentPointer);
 
 		/// @brief The callback passed to the network manager's send function to know when a Tx is completed
+		/// @param[in] parameterGroupNumber The parameter group number of the message that was sent
+		/// @param[in] dataLength The number of bytes sent
+		/// @param[in] sourceControlFunction The control function that sent the message
+		/// @param[in] destinationControlFunction The control function that received the message
+		/// @param[in] successful Whether the message was sent successfully
+		/// @param[in] parentPointer A context variable that is passed back through the callback
 		static void process_tx_callback(std::uint32_t parameterGroupNumber,
 		                                std::uint32_t dataLength,
 		                                std::shared_ptr<InternalControlFunction> sourceControlFunction,
@@ -422,6 +462,7 @@ namespace isobus
 
 		/// @brief Sends a process data message with 1 mux byte and all 0xFFs as payload
 		/// @details This just reduces code duplication by consolidating common message formats
+		/// @param[in] multiplexor The multiplexor to use for the message
 		/// @returns `true` if the message was sent, otherwise `false`
 		bool send_generic_process_data(std::uint8_t multiplexor) const;
 
@@ -475,6 +516,9 @@ namespace isobus
 		bool send_status() const;
 
 		/// @brief Sends the value command message for a specific DDI/Element number combo
+		/// @param[in] elementNumber The element number for the command
+		/// @param[in] ddi The DDI for the command
+		/// @param[in] value The value to send
 		/// @returns `true` if the message was sent, otherwise `false`
 		bool send_value_command(std::uint16_t elementNumber, std::uint16_t ddi, std::uint32_t value) const;
 
@@ -526,6 +570,7 @@ namespace isobus
 		{
 			/// @brief Allows easy comparison of callback data
 			/// @param obj the object to compare against
+			/// @returns true if the ddi and element numbers of the provided objects match, otherwise false
 			bool operator==(const ProcessDataCallbackInfo &obj) const;
 			std::uint32_t processDataValue; ///< The value of the value set command
 			std::uint32_t lastValue; ///< Used for measurement commands to store timestamp or previous values
@@ -540,8 +585,9 @@ namespace isobus
 		{
 			/// @brief Allows easy comparison of callback data
 			/// @param obj the object to compare against
+			/// @returns true if the callback and parent pointer match, otherwise false
 			bool operator==(const RequestValueCommandCallbackInfo &obj) const;
-			RequestValueCommandCallback callback = nullptr; ///< The callback itself
+			RequestValueCommandCallback callback; ///< The callback itself
 			void *parent; ///< The parent pointer, generic context value
 		};
 
@@ -550,6 +596,7 @@ namespace isobus
 		{
 			/// @brief Allows easy comparison of callback data
 			/// @param obj the object to compare against
+			/// @returns true if the callback and parent pointer match, otherwise false
 			bool operator==(const ValueCommandCallbackInfo &obj) const;
 			ValueCommandCallback callback; ///< The callback itself
 			void *parent; ///< The parent pointer, generic context value
@@ -583,6 +630,7 @@ namespace isobus
 		std::thread *workerThread = nullptr; ///< The worker thread that updates this interface
 #endif
 		std::string ddopStructureLabel; ///< Stores a pre-parsed structure label, helps to avoid processing the whole DDOP during a CAN message callback
+		std::string previousStructureLabel; ///< Stores the last structure label we used, helps to warn the user if they aren't updating the label properly
 		std::array<std::uint8_t, 7> ddopLocalizationLabel = { 0 }; ///< Stores a pre-parsed localization label, helps to avoid processing the whole DDOP during a CAN message callback
 		DDOPUploadType ddopUploadMode = DDOPUploadType::ProgramaticallyGenerated; ///< Determines if DDOPs get generated or raw uploaded
 		StateMachineState currentState = StateMachineState::Disconnected; ///< Tracks the internal state machine's current state
@@ -612,6 +660,7 @@ namespace isobus
 		bool supportsTCGEOWithPositionBasedControl = false; ///< Determines if the client reports TC-GEO with position control capability to the TC
 		bool supportsPeerControlAssignment = false; ///< Determines if the client reports peer control assignment capability to the TC
 		bool supportsImplementSectionControl = false; ///< Determines if the client reports implement section control capability to the TC
+		bool shouldReuploadAfterDDOPDeletion = false; ///< Used to determine how the state machine should progress when updating a DDOP
 	};
 } // namespace isobus
 

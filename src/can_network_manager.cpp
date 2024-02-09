@@ -31,10 +31,16 @@ namespace isobus
 
 	void CANNetworkManager::initialize()
 	{
-		receiveMessageList.clear();
+		// Clear queues
+		while (!receivedMessageQueue.empty())
+		{
+			get_next_can_message_from_rx_queue();
+		}
+		while (!transmittedMessageQueue.empty())
+		{
+			get_next_can_message_from_tx_queue();
+		}
 		initialized = true;
-		transportProtocol.initialize({});
-		extendedTransportProtocol.initialize({});
 	}
 
 	std::shared_ptr<ControlFunction> CANNetworkManager::get_control_function(std::uint8_t channelIndex, std::uint8_t address, CANLibBadge<AddressClaimStateMachine>) const
@@ -81,6 +87,11 @@ namespace isobus
 		{
 			anyControlFunctionParameterGroupNumberCallbacks.erase(callbackLocation);
 		}
+	}
+
+	EventDispatcher<CANMessage> &CANNetworkManager::get_transmitted_message_event_dispatcher()
+	{
+		return messageTransmittedEventDispatcher;
 	}
 
 	std::shared_ptr<InternalControlFunction> CANNetworkManager::get_internal_control_function(std::shared_ptr<ControlFunction> controlFunction)
@@ -132,25 +143,57 @@ namespace isobus
 		    ((parameterGroupNumber == static_cast<std::uint32_t>(CANLibParameterGroupNumber::AddressClaim)) ||
 		     (sourceControlFunction->get_address_valid())))
 		{
-			CANLibProtocol *currentProtocol;
-
-			// See if any transport layer protocol can handle this message
-			for (std::uint32_t i = 0; i < CANLibProtocol::get_number_protocols(); i++)
+			std::unique_ptr<CANMessageData> messageData;
+			if (nullptr != frameChunkCallback)
 			{
-				if (CANLibProtocol::get_protocol(i, currentProtocol))
+				messageData.reset(new CANMessageDataCallback(dataLength, frameChunkCallback, parentPointer));
+			}
+			else
+			{
+				messageData.reset(new CANMessageDataView(dataBuffer, dataLength));
+			}
+			if (transportProtocols[sourceControlFunction->get_can_port()]->protocol_transmit_message(parameterGroupNumber,
+			                                                                                         messageData,
+			                                                                                         sourceControlFunction,
+			                                                                                         destinationControlFunction,
+			                                                                                         transmitCompleteCallback,
+			                                                                                         parentPointer))
+			{
+				// Successfully sent via the transport protocol
+				retVal = true;
+			}
+			else if (extendedTransportProtocols[sourceControlFunction->get_can_port()]->protocol_transmit_message(parameterGroupNumber,
+			                                                                                                      messageData,
+			                                                                                                      sourceControlFunction,
+			                                                                                                      destinationControlFunction,
+			                                                                                                      transmitCompleteCallback,
+			                                                                                                      parentPointer))
+			{
+				// Successfully sent via the extended transport protocol
+				retVal = true;
+			}
+			else
+			{
+				//! @todo convert the other protocols to stop using the abstract protocollib class
+				CANLibProtocol *currentProtocol;
+				// See if any transport layer protocol can handle this message
+				for (std::uint32_t i = 0; i < CANLibProtocol::get_number_protocols(); i++)
 				{
-					retVal = currentProtocol->protocol_transmit_message(parameterGroupNumber,
-					                                                    dataBuffer,
-					                                                    dataLength,
-					                                                    sourceControlFunction,
-					                                                    destinationControlFunction,
-					                                                    transmitCompleteCallback,
-					                                                    parentPointer,
-					                                                    frameChunkCallback);
-
-					if (retVal)
+					if (CANLibProtocol::get_protocol(i, currentProtocol))
 					{
-						break;
+						retVal = currentProtocol->protocol_transmit_message(parameterGroupNumber,
+						                                                    dataBuffer,
+						                                                    dataLength,
+						                                                    sourceControlFunction,
+						                                                    destinationControlFunction,
+						                                                    transmitCompleteCallback,
+						                                                    parentPointer,
+						                                                    frameChunkCallback);
+
+						if (retVal)
+						{
+							break;
+						}
 					}
 				}
 			}
@@ -162,11 +205,11 @@ namespace isobus
 				if (nullptr == destinationControlFunction)
 				{
 					// Todo move binding of dest address to hardware layer
-					retVal = send_can_message_raw(sourceControlFunction->get_can_port(), sourceControlFunction->get_address(), 0xFF, parameterGroupNumber, priority, dataBuffer, dataLength);
+					retVal = send_can_message_raw(sourceControlFunction->get_can_port(), sourceControlFunction->get_address(), 0xFF, parameterGroupNumber, static_cast<std::uint8_t>(priority), dataBuffer, dataLength);
 				}
 				else if (destinationControlFunction->get_address_valid())
 				{
-					retVal = send_can_message_raw(sourceControlFunction->get_can_port(), sourceControlFunction->get_address(), destinationControlFunction->get_address(), parameterGroupNumber, priority, dataBuffer, dataLength);
+					retVal = send_can_message_raw(sourceControlFunction->get_can_port(), sourceControlFunction->get_address(), destinationControlFunction->get_address(), parameterGroupNumber, static_cast<std::uint8_t>(priority), dataBuffer, dataLength);
 				}
 
 				if ((retVal) &&
@@ -178,18 +221,6 @@ namespace isobus
 			}
 		}
 		return retVal;
-	}
-
-	void CANNetworkManager::receive_can_message(const CANMessage &message)
-	{
-		if (initialized)
-		{
-#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
-			std::lock_guard<std::mutex> lock(receiveMessageMutex);
-#endif
-
-			receiveMessageList.push_back(message);
-		}
 	}
 
 	void CANNetworkManager::update()
@@ -206,10 +237,18 @@ namespace isobus
 		update_new_partners();
 
 		process_rx_messages();
+		process_tx_messages();
 
 		update_internal_cfs();
 
 		prune_inactive_control_functions();
+
+		// Update transport protocols
+		for (std::uint32_t i = 0; i < CAN_PORT_MAXIMUM; i++)
+		{
+			transportProtocols[i]->update();
+			extendedTransportProtocols[i]->update();
+		}
 
 		for (std::size_t i = 0; i < CANLibProtocol::get_number_protocols(); i++)
 		{
@@ -253,12 +292,12 @@ namespace isobus
 
 	void receive_can_message_frame_from_hardware(const CANMessageFrame &rxFrame)
 	{
-		CANNetworkManager::process_receive_can_message_frame(rxFrame);
+		CANNetworkManager::CANNetwork.process_receive_can_message_frame(rxFrame);
 	}
 
 	void on_transmit_can_message_frame_from_hardware(const CANMessageFrame &txFrame)
 	{
-		CANNetworkManager::process_transmitted_can_message_frame(txFrame);
+		CANNetworkManager::CANNetwork.process_transmitted_can_message_frame(txFrame);
 	}
 
 	void periodic_update_from_hardware()
@@ -268,24 +307,46 @@ namespace isobus
 
 	void CANNetworkManager::process_receive_can_message_frame(const CANMessageFrame &rxFrame)
 	{
-		CANMessage tempCANMessage(rxFrame.channel);
+		update_control_functions(rxFrame);
 
-		CANNetworkManager::CANNetwork.update_control_functions(rxFrame);
+		CANIdentifier identifier(rxFrame.identifier);
+		CANMessage message(CANMessage::Type::Receive,
+		                   identifier,
+		                   rxFrame.data,
+		                   rxFrame.dataLength,
+		                   get_control_function(rxFrame.channel, identifier.get_source_address()),
+		                   get_control_function(rxFrame.channel, identifier.get_destination_address()),
+		                   rxFrame.channel);
 
-		tempCANMessage.set_identifier(CANIdentifier(rxFrame.identifier));
+		update_busload(rxFrame.channel, rxFrame.get_number_bits_in_message());
 
-		tempCANMessage.set_source_control_function(CANNetworkManager::CANNetwork.get_control_function(rxFrame.channel, tempCANMessage.get_identifier().get_source_address()));
-		tempCANMessage.set_destination_control_function(CANNetworkManager::CANNetwork.get_control_function(rxFrame.channel, tempCANMessage.get_identifier().get_destination_address()));
-		tempCANMessage.set_data(rxFrame.data, rxFrame.dataLength);
-
-		CANNetworkManager::CANNetwork.update_busload(rxFrame.channel, rxFrame.get_number_bits_in_message());
-
-		CANNetworkManager::CANNetwork.receive_can_message(tempCANMessage);
+		if (initialized)
+		{
+#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
+			std::lock_guard<std::mutex> lock(receivedMessageQueueMutex);
+#endif
+			receivedMessageQueue.push(std::move(message));
+		}
 	}
 
 	void CANNetworkManager::process_transmitted_can_message_frame(const CANMessageFrame &txFrame)
 	{
-		CANNetworkManager::CANNetwork.update_busload(txFrame.channel, txFrame.get_number_bits_in_message());
+		update_busload(txFrame.channel, txFrame.get_number_bits_in_message());
+
+		CANIdentifier identifier(txFrame.identifier);
+		CANMessage message(CANMessage::Type::Transmit,
+		                   identifier,
+		                   txFrame.data,
+		                   txFrame.dataLength,
+		                   get_control_function(txFrame.channel, identifier.get_source_address()),
+		                   get_control_function(txFrame.channel, identifier.get_destination_address()),
+		                   txFrame.channel);
+
+		if (initialized)
+		{
+			LOCK_GUARD(Mutex, transmittedMessageQueueMutex);
+			transmittedMessageQueue.push(std::move(message));
+		}
 	}
 
 	void CANNetworkManager::on_control_function_destroyed(std::shared_ptr<ControlFunction> controlFunction, CANLibBadge<ControlFunction>)
@@ -314,15 +375,18 @@ namespace isobus
 					CANStackLogger::warn("[NM]: %s control function with address '%d' was at incorrect address '%d' in the lookup table prior to deletion.", controlFunction->get_type_string().c_str(), controlFunction->get_address(), i);
 				}
 
-				if (initialized)
+				if (controlFunction->get_address() < NULL_CAN_ADDRESS)
 				{
-					// The control function was active, replace it with an new external control function
-					controlFunctionTable[controlFunction->get_can_port()][controlFunction->address] = ControlFunction::create(controlFunction->get_NAME(), controlFunction->get_address(), controlFunction->get_can_port());
-				}
-				else
-				{
-					// The network manager is not initialized yet, just remove the control function from the table
-					controlFunctionTable[controlFunction->get_can_port()][i] = nullptr;
+					if (initialized)
+					{
+						// The control function was active, replace it with an new external control function
+						controlFunctionTable[controlFunction->get_can_port()][controlFunction->address] = ControlFunction::create(controlFunction->get_NAME(), controlFunction->get_address(), controlFunction->get_can_port());
+					}
+					else
+					{
+						// The network manager is not initialized yet, just remove the control function from the table
+						controlFunctionTable[controlFunction->get_can_port()][i] = nullptr;
+					}
 				}
 			}
 		}
@@ -382,6 +446,37 @@ namespace isobus
 		return partneredControlFunctions;
 	}
 
+	std::list<std::shared_ptr<ControlFunction>> isobus::CANNetworkManager::get_control_functions(bool includingOffline) const
+	{
+		std::list<std::shared_ptr<ControlFunction>> retVal;
+
+		for (std::uint8_t channelIndex = 0; channelIndex < CAN_PORT_MAXIMUM; channelIndex++)
+		{
+			for (std::uint8_t address = 0; address < NULL_CAN_ADDRESS; address++)
+			{
+				if (nullptr != controlFunctionTable[channelIndex][address])
+				{
+					retVal.push_back(controlFunctionTable[channelIndex][address]);
+				}
+			}
+		}
+
+		if (includingOffline)
+		{
+			retVal.insert(retVal.end(), inactiveControlFunctions.begin(), inactiveControlFunctions.end());
+		}
+
+		return retVal;
+	}
+
+	std::list<std::shared_ptr<TransportProtocolSessionBase>> isobus::CANNetworkManager::get_active_transport_protocol_sessions(std::uint8_t canPortIndex) const
+	{
+		std::list<std::shared_ptr<TransportProtocolSessionBase>> retVal;
+		retVal.insert(retVal.end(), transportProtocols[canPortIndex]->get_sessions().begin(), transportProtocols[canPortIndex]->get_sessions().end());
+		retVal.insert(retVal.end(), extendedTransportProtocols[canPortIndex]->get_sessions().begin(), extendedTransportProtocols[canPortIndex]->get_sessions().end());
+		return retVal;
+	}
+
 	FastPacketProtocol &CANNetworkManager::get_fast_packet_protocol()
 	{
 		return fastPacketProtocol;
@@ -438,6 +533,28 @@ namespace isobus
 		currentBusloadBitAccumulator.fill(0);
 		lastAddressClaimRequestTimestamp_ms.fill(0);
 		controlFunctionTable.fill({ nullptr });
+
+		auto send_frame_callback = [this](std::uint32_t parameterGroupNumber,
+		                                  CANDataSpan data,
+		                                  std::shared_ptr<InternalControlFunction> sourceControlFunction,
+		                                  std::shared_ptr<ControlFunction> destinationControlFunction,
+		                                  CANIdentifier::CANPriority priority) { return this->send_can_message(parameterGroupNumber, data.begin(), data.size(), sourceControlFunction, destinationControlFunction, priority); };
+
+		for (std::uint8_t i = 0; i < CAN_PORT_MAXIMUM; i++)
+		{
+			auto receive_message_callback = [this, i](const CANMessage &message) {
+				// TODO: hack port_index for now, once network manager isn't a singleton, this can be removed
+				CANMessage tempMessage(CANMessage::Type::Receive,
+				                       message.get_identifier(),
+				                       message.get_data(),
+				                       message.get_source_control_function(),
+				                       message.get_destination_control_function(),
+				                       i);
+				this->protocol_message_callback(message);
+			};
+			transportProtocols[i].reset(new TransportProtocolManager(send_frame_callback, receive_message_callback, &configuration));
+			extendedTransportProtocols[i].reset(new ExtendedTransportProtocolManager(send_frame_callback, receive_message_callback, &configuration));
+		}
 	}
 
 	void CANNetworkManager::update_address_table(const CANMessage &message)
@@ -802,19 +919,27 @@ namespace isobus
 	CANMessage CANNetworkManager::get_next_can_message_from_rx_queue()
 	{
 #if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
-		std::lock_guard<std::mutex> lock(receiveMessageMutex);
+		std::lock_guard<std::mutex> lock(receivedMessageQueueMutex);
 #endif
-		CANMessage retVal = receiveMessageList.front();
-		receiveMessageList.pop_front();
-		return retVal;
+		if (!receivedMessageQueue.empty())
+		{
+			CANMessage retVal = std::move(receivedMessageQueue.front());
+			receivedMessageQueue.pop();
+			return retVal;
+		}
+		return CANMessage::create_invalid_message();
 	}
 
-	std::size_t CANNetworkManager::get_number_can_messages_in_rx_queue()
+	CANMessage CANNetworkManager::get_next_can_message_from_tx_queue()
 	{
-#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
-		std::lock_guard<std::mutex> lock(receiveMessageMutex);
-#endif
-		return receiveMessageList.size();
+		LOCK_GUARD(Mutex, transmittedMessageQueueMutex);
+		if (!transmittedMessageQueue.empty())
+		{
+			CANMessage retVal = std::move(transmittedMessageQueue.front());
+			transmittedMessageQueue.pop();
+			return retVal;
+		}
+		return CANMessage::create_invalid_message();
 	}
 
 	void CANNetworkManager::on_control_function_created(std::shared_ptr<ControlFunction> controlFunction)
@@ -957,7 +1082,8 @@ namespace isobus
 
 	void CANNetworkManager::process_rx_messages()
 	{
-		while (0 != get_number_can_messages_in_rx_queue())
+		// We may miss a message without locking the mutex when checking if empty, but that's okay. It will be picked up on the next iteration
+		while (!receivedMessageQueue.empty())
 		{
 			CANMessage currentMessage = get_next_can_message_from_rx_queue();
 
@@ -965,11 +1091,25 @@ namespace isobus
 			process_can_message_for_address_violations(currentMessage);
 
 			// Update Special Callbacks, like protocols and non-cf specific ones
+			transportProtocols[currentMessage.get_can_port_index()]->process_message(currentMessage);
+			extendedTransportProtocols[currentMessage.get_can_port_index()]->process_message(currentMessage);
 			process_protocol_pgn_callbacks(currentMessage);
 			process_any_control_function_pgn_callbacks(currentMessage);
 
 			// Update Others
 			process_can_message_for_global_and_partner_callbacks(currentMessage);
+		}
+	}
+
+	void CANNetworkManager::process_tx_messages()
+	{
+		// We may miss a message without locking the mutex when checking if empty, but that's okay. It will be picked up on the next iteration
+		while (!transmittedMessageQueue.empty())
+		{
+			CANMessage currentMessage = get_next_can_message_from_tx_queue();
+
+			// Update listen-only callbacks
+			messageTransmittedEventDispatcher.call(currentMessage);
 		}
 	}
 
@@ -1021,6 +1161,7 @@ namespace isobus
 	void CANNetworkManager::protocol_message_callback(const CANMessage &message)
 	{
 		process_can_message_for_global_and_partner_callbacks(message);
+		process_any_control_function_pgn_callbacks(message);
 		process_can_message_for_commanded_address(message);
 	}
 

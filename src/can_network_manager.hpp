@@ -30,6 +30,7 @@
 #include <deque>
 #include <list>
 #include <memory>
+#include <queue>
 
 #if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
 #include <mutex>
@@ -88,7 +89,13 @@ namespace isobus
 		/// @param[in] parent A generic context variable that helps identify what object the callback was destined for
 		void remove_any_control_function_parameter_group_number_callback(std::uint32_t parameterGroupNumber, CANLibCallback callback, void *parent);
 
+		/// @brief Returns the network manager's event dispatcher for notifying consumers whenever a
+		/// message is transmitted by our application
+		/// @returns An event dispatcher which can be used to get notified about transmitted messages
+		EventDispatcher<CANMessage> &get_transmitted_message_event_dispatcher();
+
 		/// @brief Returns an internal control function if the passed-in control function is an internal type
+		/// @param[in] controlFunction The control function to get the internal control function from
 		/// @returns An internal control function casted from the passed in control function
 		std::shared_ptr<InternalControlFunction> get_internal_control_function(std::shared_ptr<ControlFunction> controlFunction);
 
@@ -106,6 +113,15 @@ namespace isobus
 		/// If you don't specify a destination (or use nullptr) you message will be sent as a broadcast
 		/// if it is valid to do so.
 		/// You can also get a callback on success or failure of the transmit.
+		/// @param[in] parameterGroupNumber The PGN to use when sending the message
+		/// @param[in] dataBuffer A pointer to the data buffer to send from
+		/// @param[in] dataLength The size of the message to send
+		/// @param[in] sourceControlFunction The control function that is sending the message
+		/// @param[in] destinationControlFunction The control function that the message is destined for or nullptr if broadcast
+		/// @param[in] priority The CAN priority of the message being sent
+		/// @param[in] txCompleteCallback A callback to be called when the message is sent or fails to send
+		/// @param[in] parentPointer A generic context variable that helps identify what object the callback is destined for
+		/// @param[in] frameChunkCallback A callback which can be supplied to have the tack call you back to get chunks of the message as they are sent
 		/// @returns `true` if the message was sent, otherwise `false`
 		bool send_can_message(std::uint32_t parameterGroupNumber,
 		                      const std::uint8_t *dataBuffer,
@@ -117,22 +133,16 @@ namespace isobus
 		                      void *parentPointer = nullptr,
 		                      DataChunkCallback frameChunkCallback = nullptr);
 
-		/// @brief This is the main function used by the stack to receive CAN messages and add them to a queue.
-		/// @details This function is called by the stack itself when you call can_lib_process_rx_message.
-		/// @param[in] message The message to be received
-		void receive_can_message(const CANMessage &message);
-
 		/// @brief The main update function for the network manager. Updates all protocols.
 		void update();
 
-		/// @brief Process the CAN Rx queue
+		/// @brief Used to tell the network manager when frames are received on the bus.
 		/// @param[in] rxFrame Frame to process
-		static void process_receive_can_message_frame(const CANMessageFrame &rxFrame);
+		void process_receive_can_message_frame(const CANMessageFrame &rxFrame);
 
-		/// @brief Used to tell the network manager when frames are emitted on the bus, so that they can be
-		/// added to the internal bus load calculations.
+		/// @brief Used to tell the network manager when frames are emitted on the bus.
 		/// @param[in] txFrame The frame that was just emitted onto the bus
-		static void process_transmitted_can_message_frame(const CANMessageFrame &txFrame);
+		void process_transmitted_can_message_frame(const CANMessageFrame &txFrame);
 
 		/// @brief Informs the network manager that a control function object has been destroyed, so that it can be purged from the network manager
 		/// @param[in] controlFunction The control function that was destroyed
@@ -167,6 +177,17 @@ namespace isobus
 		/// @returns A list of all the partnered control functions
 		const std::list<std::shared_ptr<PartneredControlFunction>> &get_partnered_control_functions() const;
 
+		/// @brief Gets all the control functions that are known to the network manager
+		/// @param[in] includingOffline If true, all control functions are returned, otherwise only online control functions are returned
+		/// @returns A list of all the control functions
+		std::list<std::shared_ptr<ControlFunction>> get_control_functions(bool includingOffline) const;
+
+		/// @brief Gets all the active transport protocol sessions that are currently active
+		/// @note The list returns pointers to the transport protocol sessions, but they can disappear at any time
+		/// @param[in] canPortIndex The CAN channel index to get the transport protocol sessions for
+		/// @returns A list of all the active transport protocol sessions
+		std::list<std::shared_ptr<TransportProtocolSessionBase>> get_active_transport_protocol_sessions(std::uint8_t canPortIndex) const;
+
 		/// @brief Returns the class instance of the NMEA2k fast packet protocol.
 		/// Use this to register for FP multipacket messages
 		/// @returns The class instance of the NMEA2k fast packet protocol.
@@ -189,7 +210,7 @@ namespace isobus
 		friend class DiagnosticProtocol; ///< Allows the diagnostic protocol to access the protected functions on the network manager
 		friend class ParameterGroupNumberRequestProtocol; ///< Allows the PGN request protocol to access the network manager protected functions
 		friend class FastPacketProtocol; ///< Allows the FP protocol to access the network manager protected functions
-		friend class CANLibProtocol;
+		friend class CANLibProtocol; ///< Allows the CANLib protocol base class functions to access the network manager protected functions
 
 		/// @brief Adds a PGN callback for a protocol class
 		/// @param[in] parameterGroupNumber The PGN to register for
@@ -278,14 +299,15 @@ namespace isobus
 		/// @returns A control function matching the address and CAN port passed in
 		std::shared_ptr<ControlFunction> get_control_function(std::uint8_t channelIndex, std::uint8_t address) const;
 
-		/// @brief Gets a message from the Rx Queue.
-		/// @note This will only ever get an 8 byte message. Long messages are handled elsewhere.
-		/// @returns The can message that was at the front of the buffer
+		/// @brief Get the next CAN message from the received message queue, and remove it from the queue.
+		/// @note This will only ever get an 8 byte message because they are directly translated from CAN frames.
+		/// @returns The message that was at the front of the queue, or an invalid message if the queue is empty
 		CANMessage get_next_can_message_from_rx_queue();
 
-		/// @brief Returns the number of messages in the rx queue that need to be processed
-		/// @returns The number of messages in the rx queue that need to be processed
-		std::size_t get_number_can_messages_in_rx_queue();
+		/// @brief Get the next CAN message from the received message queue, and remove it from the queue
+		/// @note This will only ever get an 8 byte message because they are directly translated from CAN frames.
+		/// @returns The message that was at the front of the queue, or an invalid message if the queue is empty
+		CANMessage get_next_can_message_from_tx_queue();
 
 		/// @brief Informs the network manager that a control function object has been created
 		/// @param[in] controlFunction The control function that was created
@@ -323,8 +345,11 @@ namespace isobus
 		/// @param[in] message The message to process
 		void process_can_message_for_commanded_address(const CANMessage &message);
 
-		/// @brief Processes the internal receive message queue
+		/// @brief Processes the internal received message queue
 		void process_rx_messages();
+
+		/// @brief Processes the internal transmitted message queue
+		void process_tx_messages();
 
 		/// @brief Checks to see if any control function didn't claim during a round of
 		/// address claiming and removes it if needed.
@@ -356,9 +381,9 @@ namespace isobus
 		static constexpr std::uint32_t BUSLOAD_UPDATE_FREQUENCY_MS = 100; ///< Bus load bit accumulation happens over a 100ms window
 
 		CANNetworkConfiguration configuration; ///< The configuration for this network manager
-		ExtendedTransportProtocolManager extendedTransportProtocol; ///< Static instance of the protocol manager
+		std::array<std::unique_ptr<TransportProtocolManager>, CAN_PORT_MAXIMUM> transportProtocols; ///< One instance of the transport protocol manager for each channel
+		std::array<std::unique_ptr<ExtendedTransportProtocolManager>, CAN_PORT_MAXIMUM> extendedTransportProtocols; ///< One instance of the extended transport protocol manager for each channel
 		FastPacketProtocol fastPacketProtocol; ///< Instance of the fast packet protocol
-		TransportProtocolManager transportProtocol; ///< Static instance of the transport protocol manager
 
 		std::array<std::deque<std::uint32_t>, CAN_PORT_MAXIMUM> busloadMessageBitsHistory; ///< Stores the approximate number of bits processed on each channel over multiple previous time windows
 		std::array<std::uint32_t, CAN_PORT_MAXIMUM> currentBusloadBitAccumulator; ///< Accumulates the approximate number of bits processed on each channel during the current time window
@@ -370,18 +395,21 @@ namespace isobus
 		std::list<std::shared_ptr<PartneredControlFunction>> partneredControlFunctions; ///< A list of the partnered control functions
 
 		std::list<ParameterGroupNumberCallbackData> protocolPGNCallbacks; ///< A list of PGN callback registered by CAN protocols
-		std::list<CANMessage> receiveMessageList; ///< A queue of Rx messages to process
+		std::queue<CANMessage> receivedMessageQueue; ///< A queue of received messages to process
+		std::queue<CANMessage> transmittedMessageQueue; ///< A queue of transmitted messages to process (already sent, so changes to the message won't affect the bus)
 		std::list<ControlFunctionStateCallback> controlFunctionStateCallbacks; ///< List of all control function state callbacks
 		std::vector<ParameterGroupNumberCallbackData> globalParameterGroupNumberCallbacks; ///< A list of all global PGN callbacks
 		std::vector<ParameterGroupNumberCallbackData> anyControlFunctionParameterGroupNumberCallbacks; ///< A list of all global PGN callbacks
-		EventDispatcher<std::shared_ptr<InternalControlFunction>> addressViolationEventDispatcher; // An event dispatcher for notifying consumers about address violations
+		EventDispatcher<CANMessage> messageTransmittedEventDispatcher; ///< An event dispatcher for notifying consumers about transmitted messages by our application
+		EventDispatcher<std::shared_ptr<InternalControlFunction>> addressViolationEventDispatcher; ///< An event dispatcher for notifying consumers about address violations
 #if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
-		std::mutex receiveMessageMutex; ///< A mutex for receive messages thread safety
+		std::mutex receivedMessageQueueMutex; ///< A mutex for receive messages thread safety
 		std::mutex protocolPGNCallbacksMutex; ///< A mutex for PGN callback thread safety
 		std::mutex anyControlFunctionCallbacksMutex; ///< Mutex to protect the "any CF" callbacks
 		std::mutex busloadUpdateMutex; ///< A mutex that protects the busload metrics since we calculate it on our own thread
 		std::mutex controlFunctionStatusCallbacksMutex; ///< A Mutex that protects access to the control function status callback list
 #endif
+		Mutex transmittedMessageQueueMutex; ///< A mutex for protecting the transmitted message queue
 		std::uint32_t busloadUpdateTimestamp_ms = 0; ///< Tracks a time window for determining approximate busload
 		std::uint32_t updateTimestamp_ms = 0; ///< Keeps track of the last time the CAN stack was update in milliseconds
 		bool initialized = false; ///< True if the network manager has been initialized by the update function

@@ -28,8 +28,8 @@ namespace isobus
 		ECUtoVirtualTerminal = 0xE700,
 		Acknowledge = 0xE800,
 		ParameterGroupNumberRequest = 0xEA00,
-		TransportProtocolData = 0xEB00,
-		TransportProtocolCommand = 0xEC00,
+		TransportProtocolDataTransfer = 0xEB00,
+		TransportProtocolConnectionManagement = 0xEC00,
 		AddressClaim = 0xEE00,
 		ProprietaryA = 0xEF00,
 		MachineSelectedSpeed = 0xF022,
@@ -49,7 +49,14 @@ namespace isobus
 		DiagnosticMessage11 = 0xFED3,
 		CommandedAddress = 0xFED8,
 		SoftwareIdentification = 0xFEDA,
-		AllImplementsStopOperationsSwitchState = 0xFD02
+		AllImplementsStopOperationsSwitchState = 0xFD02,
+		VesselHeading = 0x1F112,
+		RateOfTurn = 0x1F113,
+		PositionRapidUpdate = 0x1F801,
+		CourseOverGroundSpeedOverGroundRapidUpdate = 0x1F802,
+		PositionDeltaHighPrecisionRapidUpdate = 0x1F803,
+		GNSSPositionData = 0x1F805,
+		Datum = 0x1F814
 	};
 
 } // namespace isobus

@@ -19,8 +19,8 @@
 
 namespace isobus
 {
-	FastPacketProtocol::FastPacketProtocolSession::FastPacketProtocolSession(Direction sessionDirection, std::uint8_t canPortIndex) :
-	  sessionMessage(canPortIndex),
+	FastPacketProtocol::FastPacketProtocolSession::FastPacketProtocolSession(Direction sessionDirection) :
+	  sessionMessage(CANMessage::create_invalid_message()),
 	  sessionCompleteCallback(nullptr),
 	  frameChunkCallback(nullptr),
 	  parent(nullptr),
@@ -102,19 +102,16 @@ namespace isobus
 
 			if (!get_session(tempSession, parameterGroupNumber, source, destination))
 			{
-				tempSession = new FastPacketProtocolSession(FastPacketProtocolSession::Direction::Transmit, source->get_can_port());
-				tempSession->sessionMessage.set_source_control_function(source);
-				tempSession->sessionMessage.set_destination_control_function(destination);
-				tempSession->sessionMessage.set_identifier(CANIdentifier(CANIdentifier::Type::Extended, parameterGroupNumber, priority, (destination == nullptr ? 0xFF : destination->get_address()), source->get_address()));
-				if (data != nullptr)
-				{
-					tempSession->sessionMessage.set_data(data, messageLength);
-				}
-				else
-				{
-					tempSession->frameChunkCallback = frameChunkCallback;
-					tempSession->frameChunkCallbackMessageLength = messageLength;
-				}
+				tempSession = new FastPacketProtocolSession(FastPacketProtocolSession::Direction::Transmit);
+				CANIdentifier identifier(CANIdentifier::Type::Extended, parameterGroupNumber, priority, (destination == nullptr ? 0xFF : destination->get_address()), source->get_address());
+				tempSession->sessionMessage = CANMessage(CANMessage::Type::Transmit,
+				                                         identifier,
+				                                         data,
+				                                         messageLength,
+				                                         source,
+				                                         destination,
+				                                         source->get_can_port());
+
 				tempSession->parent = parentPointer;
 				tempSession->packetCount = ((messageLength - 6) / PROTOCOL_BYTES_PER_FRAME);
 				tempSession->timestamp_ms = SystemTiming::get_timestamp_ms();
@@ -137,12 +134,12 @@ namespace isobus
 			else
 			{
 				// Already in a matching session, can't start another.
-				CANStackLogger::CAN_stack_log(CANStackLogger::LoggingLevel::Warning, "[FP]: Can't send fast packet message, already in matching session.");
+				CANStackLogger::warn("[FP]: Can't send fast packet message, already in matching session.");
 			}
 		}
 		else
 		{
-			CANStackLogger::CAN_stack_log(CANStackLogger::LoggingLevel::Error, "[FP]: Can't send fast packet message, bad parameters or ICF is invalid");
+			CANStackLogger::error("[FP]: Can't send fast packet message, bad parameters or ICF is invalid");
 		}
 		return retVal;
 	}
@@ -189,11 +186,11 @@ namespace isobus
 		}
 	}
 
-	void FastPacketProtocol::close_session(FastPacketProtocolSession *session, bool successfull)
+	void FastPacketProtocol::close_session(FastPacketProtocolSession *session, bool successful)
 	{
 		if (nullptr != session)
 		{
-			process_session_complete_callback(session, successfull);
+			process_session_complete_callback(session, successful);
 			for (auto currentSession = activeSessions.begin(); currentSession != activeSessions.end(); currentSession++)
 			{
 				if (session == *currentSession)
@@ -317,7 +314,7 @@ namespace isobus
 						}
 						else
 						{
-							CANStackLogger::CAN_stack_log(CANStackLogger::LoggingLevel::Error, "[FP]: Existing session matched new frame counter, aborting the matching session.");
+							CANStackLogger::error("[FP]: Existing session matched new frame counter, aborting the matching session.");
 							close_session(currentSession, false);
 						}
 					}
@@ -329,7 +326,7 @@ namespace isobus
 							if (messageData[1] <= MAX_PROTOCOL_MESSAGE_LENGTH)
 							{
 								// This is the beginning of a new message
-								currentSession = new FastPacketProtocolSession(FastPacketProtocolSession::Direction::Receive, message.get_can_port_index());
+								currentSession = new FastPacketProtocolSession(FastPacketProtocolSession::Direction::Receive);
 								currentSession->frameChunkCallback = nullptr;
 								if (messageData[1] >= PROTOCOL_BYTES_PER_FRAME - 1)
 								{
@@ -341,10 +338,15 @@ namespace isobus
 								}
 								currentSession->lastPacketNumber = ((messageData[0] >> SEQUENCE_NUMBER_BIT_OFFSET) & SEQUENCE_NUMBER_BIT_MASK);
 								currentSession->processedPacketsThisSession = 1;
+
+								currentSession->sessionMessage = CANMessage(CANMessage::Type::Receive,
+								                                            message.get_identifier(),
+								                                            nullptr,
+								                                            0,
+								                                            message.get_source_control_function(),
+								                                            message.get_destination_control_function(),
+								                                            message.get_can_port_index());
 								currentSession->sessionMessage.set_data_size(messageData[1]);
-								currentSession->sessionMessage.set_identifier(message.get_identifier());
-								currentSession->sessionMessage.set_source_control_function(message.get_source_control_function());
-								currentSession->sessionMessage.set_destination_control_function(message.get_destination_control_function());
 								currentSession->timestamp_ms = SystemTiming::get_timestamp_ms();
 
 								if (0 != (messageData[1] % PROTOCOL_BYTES_PER_FRAME))
@@ -365,14 +367,14 @@ namespace isobus
 							}
 							else
 							{
-								CANStackLogger::CAN_stack_log(CANStackLogger::LoggingLevel::Warning, "[FP]: Ignoring possible new FP session with advertised length > 233.");
+								CANStackLogger::warn("[FP]: Ignoring possible new FP session with advertised length > 233.");
 							}
 						}
 						else
 						{
 							// This is the middle of some message that we have no context for.
 							// Ignore the message for now until we receive it with a fresh packet counter.
-							CANStackLogger::CAN_stack_log(CANStackLogger::LoggingLevel::Warning, "[FP]: Ignoring FP message with PGN %u, no context available. The message may be processed when packet count returns to zero.", message.get_identifier().get_parameter_group_number());
+							CANStackLogger::warn("[FP]: Ignoring FP message with PGN %u, no context available. The message may be processed when packet count returns to zero.", message.get_identifier().get_parameter_group_number());
 						}
 					}
 				}
@@ -418,7 +420,7 @@ namespace isobus
 				{
 					if (SystemTiming::time_expired_ms(session->timestamp_ms, FP_TIMEOUT_MS))
 					{
-						CANStackLogger::CAN_stack_log(CANStackLogger::LoggingLevel::Error, "[FP]: Rx session timed out.");
+						CANStackLogger::error("[FP]: Rx session timed out.");
 						close_session(session, false);
 					}
 				}
@@ -517,7 +519,7 @@ namespace isobus
 						{
 							if (SystemTiming::time_expired_ms(session->timestamp_ms, FP_TIMEOUT_MS))
 							{
-								CANStackLogger::CAN_stack_log(CANStackLogger::LoggingLevel::Error, "[FP]: Tx session timed out.");
+								CANStackLogger::error("[FP]: Tx session timed out.");
 								close_session(session, false);
 								txSessionCancelled = true;
 							}

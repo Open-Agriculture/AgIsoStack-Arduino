@@ -8,8 +8,6 @@ auto can0 = std::make_shared<FlexCANT4Plugin>(0);
 std::shared_ptr<InternalControlFunction>  ISOBUSControlFunction = nullptr;
 std::shared_ptr<DiagnosticProtocol> ISOBUSDiagnostics = nullptr;
 std::shared_ptr<VirtualTerminalClient> ExampleVirtualTerminalClient = nullptr;
-std::shared_ptr<void> softKeyListener = nullptr;
-std::shared_ptr<void> buttonListener = nullptr;
 
 // A log sink for the CAN stack
 class CustomLogger : public CANStackLogger
@@ -146,9 +144,9 @@ void setup() {
   const std::vector<NAMEFilter> vtNameFilters = { filterVirtualTerminal };
   auto TestPartnerVT = PartneredControlFunction::create(0, vtNameFilters);
   ExampleVirtualTerminalClient = std::make_shared<VirtualTerminalClient>(TestPartnerVT, ISOBUSControlFunction);
-  ExampleVirtualTerminalClient->set_object_pool(0, VirtualTerminalClient::VTVersion::Version3, VT3TestPool, sizeof(VT3TestPool), "AIS1");
-  softKeyListener = ExampleVirtualTerminalClient->add_vt_soft_key_event_listener(handleVTKeyEvents);
-  buttonListener = ExampleVirtualTerminalClient->add_vt_button_event_listener(handleVTKeyEvents);
+  ExampleVirtualTerminalClient->set_object_pool(0, VT3TestPool, sizeof(VT3TestPool), "AIS1");
+  ExampleVirtualTerminalClient->get_vt_button_event_dispatcher().add_listener(handleVTKeyEvents);
+  ExampleVirtualTerminalClient->get_vt_button_event_dispatcher().add_listener(handleVTKeyEvents);
   ExampleVirtualTerminalClient->initialize(false);
 }
 

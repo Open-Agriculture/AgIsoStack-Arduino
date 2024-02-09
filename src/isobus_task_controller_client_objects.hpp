@@ -72,9 +72,6 @@ namespace isobus
 			/// @brief The max allowable "valid" object ID
 			static constexpr std::uint16_t MAX_OBJECT_ID = 65534;
 
-			/// @brief Special ID used to indicate no object
-			static constexpr std::uint16_t NULL_OBJECT_ID = 65535;
-
 			/// @brief Defines the max length of a designator (in bytes)
 			static constexpr std::size_t MAX_DESIGNATOR_LENGTH = 128;
 
@@ -280,6 +277,7 @@ namespace isobus
 			std::size_t get_number_child_objects() const;
 
 			/// @brief Returns a child object ID by index
+			/// @param[in] index The index of the child object ID to return
 			/// @returns Child object ID by index, or NULL_OBJECT_ID if the index is out of range
 			std::uint16_t get_child_object_id(std::size_t index);
 
