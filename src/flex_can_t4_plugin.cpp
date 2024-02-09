@@ -104,7 +104,7 @@ namespace isobus
 		message.id = canFrame.identifier;
 		message.len = canFrame.dataLength;
 		message.flags.extended = true;
-		message.seq = 1; // Try to get messages to go out sequentially...
+		message.seq = true; // Ask for sequential transmission
 		memcpy(message.buf, canFrame.data, canFrame.dataLength);
 
 		if (0 == selectedChannel)

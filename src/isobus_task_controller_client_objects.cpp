@@ -8,6 +8,7 @@
 //================================================================================================
 #include "isobus_task_controller_client_objects.hpp"
 
+#include "can_constants.hpp"
 #include "platform_endianness.hpp"
 
 #include <algorithm>

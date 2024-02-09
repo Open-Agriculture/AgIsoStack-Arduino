@@ -135,11 +135,18 @@ namespace isobus
 		/// @returns `true` if the object pool was generated and is valid, otherwise `false`.
 		bool generate_binary_object_pool(std::vector<std::uint8_t> &resultantPool);
 
+		/// Constructs a ISOXML formatted TASKDATA.xml file inside a string using the objects that were previously added.
+		/// @param[in,out] resultantString The XML representation of the DDOP, or an empty string if this function returns false
+		/// @returns `true` if the object pool was generated and is valid, otherwise `false`.
+		bool generate_task_data_iso_xml(std::string &resultantString);
+
 		/// @brief Gets an object from the DDOP that corresponds to a certain object ID
+		/// @param[in] objectID The ID of the object to get
 		/// @returns Pointer to the object matching the provided ID, or nullptr if no match was found
 		std::shared_ptr<task_controller_object::Object> get_object_by_id(std::uint16_t objectID);
 
 		/// @brief Gets an object from the DDOP by index based on object creation
+		/// @param[in] index The index of the object to get
 		/// @returns Pointer to the object matching the index, or nullptr if no match was found
 		std::shared_ptr<task_controller_object::Object> get_object_by_index(std::uint16_t index);
 
