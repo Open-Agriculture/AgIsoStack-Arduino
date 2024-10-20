@@ -30,14 +30,13 @@
 ///
 /// @author Adrian Del Grosso
 ///
-/// @copyright 2022 Adrian Del Grosso
+/// @copyright 2022 The Open-Agriculture Developers
 //================================================================================================
 
 #ifndef ISOBUS_DIAGNOSTIC_PROTOCOL_HPP
 #define ISOBUS_DIAGNOSTIC_PROTOCOL_HPP
 
 #include "can_internal_control_function.hpp"
-#include "can_protocol.hpp"
 #include "isobus_functionalities.hpp"
 #include "processing_flags.hpp"
 

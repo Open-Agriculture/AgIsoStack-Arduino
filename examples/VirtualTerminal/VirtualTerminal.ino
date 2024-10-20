@@ -121,9 +121,9 @@ void setup() {
   deviceNAME.set_ecu_instance(0);
   deviceNAME.set_function_instance(0);
   deviceNAME.set_device_class_instance(0);
-  deviceNAME.set_manufacturer_code(64);
-  // Change 0x81 to be your preferred address, but 0x81 is the base arbitrary address
-  ISOBUSControlFunction = InternalControlFunction::create(deviceNAME, 0x81, 0);
+  deviceNAME.set_manufacturer_code(1407); // This is the Open-Agriculture manufacturer code. You are welcome to use it if you want.
+  // If you want to set a preferred address, you can add another parameter below, like (deviceNAME, 0, 0x81), otherwise the CAN stack will choose one automatically.
+  ISOBUSControlFunction = CANNetworkManager::CANNetwork.create_internal_control_function(deviceNAME, 0);
   ISOBUSDiagnostics = std::make_shared<DiagnosticProtocol>(ISOBUSControlFunction);
   ISOBUSDiagnostics->initialize();
 
@@ -142,11 +142,11 @@ void setup() {
   // Set up virtual terminal client
   const NAMEFilter filterVirtualTerminal(NAME::NAMEParameters::FunctionCode, static_cast<std::uint8_t>(NAME::Function::VirtualTerminal));
   const std::vector<NAMEFilter> vtNameFilters = { filterVirtualTerminal };
-  auto TestPartnerVT = PartneredControlFunction::create(0, vtNameFilters);
+  auto TestPartnerVT = CANNetworkManager::CANNetwork.create_partnered_control_function(0, vtNameFilters);
   ExampleVirtualTerminalClient = std::make_shared<VirtualTerminalClient>(TestPartnerVT, ISOBUSControlFunction);
   ExampleVirtualTerminalClient->set_object_pool(0, VT3TestPool, sizeof(VT3TestPool), "AIS1");
   ExampleVirtualTerminalClient->get_vt_button_event_dispatcher().add_listener(handleVTKeyEvents);
-  ExampleVirtualTerminalClient->get_vt_button_event_dispatcher().add_listener(handleVTKeyEvents);
+  ExampleVirtualTerminalClient->get_vt_soft_key_event_dispatcher().add_listener(handleVTKeyEvents);
   ExampleVirtualTerminalClient->initialize(false);
 }
 

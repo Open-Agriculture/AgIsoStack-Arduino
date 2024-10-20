@@ -4,7 +4,7 @@
 /// @brief A class to manage a client connection to a ISOBUS field computer's task controller
 /// @author Adrian Del Grosso
 ///
-/// @copyright 2022 Adrian Del Grosso
+/// @copyright 2022 The Open-Agriculture Developers
 //================================================================================================
 #ifndef ISOBUS_TASK_CONTROLLER_CLIENT_HPP
 #define ISOBUS_TASK_CONTROLLER_CLIENT_HPP
@@ -16,12 +16,12 @@
 #include "processing_flags.hpp"
 
 #include <list>
+#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
 #include <thread>
+#endif
 
 namespace isobus
 {
-	class VirtualTerminalClient; // Forward declaring VT client
-
 	/// @brief A class to manage a client connection to a ISOBUS field computer's task controller or data logger
 	class TaskControllerClient
 	{
@@ -86,20 +86,20 @@ namespace isobus
 		/// @brief A callback for handling a value request command from the TC
 		using RequestValueCommandCallback = bool (*)(std::uint16_t elementNumber,
 		                                             std::uint16_t DDI,
-		                                             std::uint32_t &processVariableValue,
+		                                             std::int32_t &processVariableValue,
 		                                             void *parentPointer);
 
 		/// @brief A callback for handling a set value command from the TC
 		using ValueCommandCallback = bool (*)(std::uint16_t elementNumber,
 		                                      std::uint16_t DDI,
-		                                      std::uint32_t processVariableValue,
+		                                      std::int32_t processVariableValue,
 		                                      void *parentPointer);
 
 		/// @brief The constructor for a TaskControllerClient
 		/// @param[in] partner The TC server control function
 		/// @param[in] clientSource The internal control function to communicate from
 		/// @param[in] primaryVT Pointer to our primary VT. This is optional (can be nullptr), but should be provided if possible to provide the best compatibility to TC < version 4.
-		TaskControllerClient(std::shared_ptr<PartneredControlFunction> partner, std::shared_ptr<InternalControlFunction> clientSource, std::shared_ptr<VirtualTerminalClient> primaryVT);
+		TaskControllerClient(std::shared_ptr<PartneredControlFunction> partner, std::shared_ptr<InternalControlFunction> clientSource, std::shared_ptr<PartneredControlFunction> primaryVT);
 
 		/// @brief Destructor for the client
 		~TaskControllerClient();
@@ -112,7 +112,7 @@ namespace isobus
 
 		/// @brief This adds a callback that will be called when the TC requests the value of one of your variables.
 		/// @details The task controller will often send a request for the value of a process data variable.
-		/// When the stack recieves those messages, it will call this callback to request the value from your
+		/// When the stack receives those messages, it will call this callback to request the value from your
 		/// application. You must provide the value at that time for the associated process data variable identified
 		/// by its element number and DDI.
 		/// @param[in] callback The callback to add
@@ -520,7 +520,7 @@ namespace isobus
 		/// @param[in] ddi The DDI for the command
 		/// @param[in] value The value to send
 		/// @returns `true` if the message was sent, otherwise `false`
-		bool send_value_command(std::uint16_t elementNumber, std::uint16_t ddi, std::uint32_t value) const;
+		bool send_value_command(std::uint16_t elementNumber, std::uint16_t ddi, std::int32_t value) const;
 
 		/// @brief Sends the version request message to the TC
 		/// @returns `true` if the message was sent, otherwise `false`
@@ -558,6 +558,9 @@ namespace isobus
 		/// @param[in] timestamp The new value for the state machine timestamp (in milliseconds)
 		void set_state(StateMachineState newState, std::uint32_t timestamp);
 
+		/// @brief Sets the behavior of the language command interface based on the TC's reported version information
+		void select_language_command_partner();
+
 		/// @brief The worker thread will execute this function when it runs, if applicable
 		void worker_thread_function();
 
@@ -572,8 +575,8 @@ namespace isobus
 			/// @param obj the object to compare against
 			/// @returns true if the ddi and element numbers of the provided objects match, otherwise false
 			bool operator==(const ProcessDataCallbackInfo &obj) const;
-			std::uint32_t processDataValue; ///< The value of the value set command
-			std::uint32_t lastValue; ///< Used for measurement commands to store timestamp or previous values
+			std::int32_t processDataValue; ///< The value of the value set command
+			std::int32_t lastValue; ///< Used for measurement commands to store timestamp or previous values
 			std::uint16_t elementNumber; ///< The element number for the command
 			std::uint16_t ddi; ///< The DDI for the command
 			bool ackRequested; ///< Stores if the TC used the mux that also requires a PDACK
@@ -612,7 +615,7 @@ namespace isobus
 
 		std::shared_ptr<PartneredControlFunction> partnerControlFunction; ///< The partner control function this client will send to
 		std::shared_ptr<InternalControlFunction> myControlFunction; ///< The internal control function the client uses to send from
-		std::shared_ptr<VirtualTerminalClient> primaryVirtualTerminal; ///< A pointer to the primary VT. Used for TCs < version 4
+		std::shared_ptr<PartneredControlFunction> primaryVirtualTerminal; ///< A pointer to the primary VT's control function. Used for TCs < version 4 and language command compatibility
 		std::shared_ptr<DeviceDescriptorObjectPool> clientDDOP; ///< Stores the DDOP for upload to the TC (if needed)
 		std::uint8_t const *userSuppliedBinaryDDOP = nullptr; ///< Stores a client-provided DDOP if one was provided
 		std::shared_ptr<std::vector<std::uint8_t>> userSuppliedVectorDDOP; ///< Stores a client-provided DDOP if one was provided
@@ -625,8 +628,8 @@ namespace isobus
 		std::list<ProcessDataCallbackInfo> measurementMinimumThresholdCommands; ///< A list of measurement commands that will be processed when the value drops below a threshold
 		std::list<ProcessDataCallbackInfo> measurementMaximumThresholdCommands; ///< A list of measurement commands that will be processed when the value above a threshold
 		std::list<ProcessDataCallbackInfo> measurementOnChangeThresholdCommands; ///< A list of measurement commands that will be processed when the value changes by the specified amount
+		Mutex clientMutex; ///< A general mutex to protect data in the worker thread against data accessed by the app or the network manager
 #if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
-		std::mutex clientMutex; ///< A general mutex to protect data in the worker thread against data accessed by the app or the network manager
 		std::thread *workerThread = nullptr; ///< The worker thread that updates this interface
 #endif
 		std::string ddopStructureLabel; ///< Stores a pre-parsed structure label, helps to avoid processing the whole DDOP during a CAN message callback
@@ -638,6 +641,7 @@ namespace isobus
 		std::uint32_t statusMessageTimestamp_ms = 0; ///< Timestamp corresponding to the last time we sent a status message to the TC
 		std::uint32_t serverStatusMessageTimestamp_ms = 0; ///< Timestamp corresponding to the last time we received a status message from the TC
 		std::uint32_t userSuppliedBinaryDDOPSize_bytes = 0; ///< The number of bytes in the user provided binary DDOP (if one was provided)
+		std::uint32_t languageCommandWaitingTimestamp_ms = 0; ///< Timestamp used to determine when to give up on waiting for a language command response
 		std::uint8_t numberOfWorkingSetMembers = 1; ///< The number of working set members that will be reported in the working set master message
 		std::uint8_t tcStatusBitfield = 0; ///< The last received TC/DL status from the status message
 		std::uint8_t sourceAddressOfCommandBeingExecuted = 0; ///< Source address of client for which the current command is being executed

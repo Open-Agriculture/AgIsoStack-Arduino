@@ -6,7 +6,7 @@
 /// are made and responded to.
 /// @author Adrian Del Grosso
 ///
-/// @copyright 2022 Adrian Del Grosso
+/// @copyright 2022 The Open-Agriculture Developers
 //================================================================================================
 #ifndef CAN_PARAMETER_GROUP_NUMBER_REQUEST_PROTOCOL_HPP
 #define CAN_PARAMETER_GROUP_NUMBER_REQUEST_PROTOCOL_HPP
@@ -32,7 +32,7 @@ namespace isobus
 	public:
 		/// @brief The constructor for this protocol
 		/// @param[in] internalControlFunction The internal control function that owns this protocol and will be used to send messages
-		ParameterGroupNumberRequestProtocol(std::shared_ptr<InternalControlFunction> internalControlFunction, CANLibBadge<InternalControlFunction>);
+		explicit ParameterGroupNumberRequestProtocol(std::shared_ptr<InternalControlFunction> internalControlFunction);
 
 		/// @brief The destructor for this protocol
 		~ParameterGroupNumberRequestProtocol();
@@ -159,9 +159,7 @@ namespace isobus
 		std::shared_ptr<InternalControlFunction> myControlFunction; ///< The internal control function that this protocol will send from
 		std::vector<PGNRequestCallbackInfo> pgnRequestCallbacks; ///< A list of all registered PGN callbacks and the PGN associated with each callback
 		std::vector<PGNRequestForRepetitionRateCallbackInfo> repetitionRateCallbacks; ///< A list of all registered request for repetition rate callbacks and the PGN associated with the callback
-#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
-		std::mutex pgnRequestMutex; ///< A mutex to protect the callback lists
-#endif
+		Mutex pgnRequestMutex; ///< A mutex to protect the callback lists
 	};
 }
 

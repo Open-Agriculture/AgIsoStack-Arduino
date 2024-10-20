@@ -5,7 +5,7 @@
 /// ISO11783-7 commonly used in VT and TC communication
 /// @author Adrian Del Grosso
 ///
-/// @copyright 2023 Adrian Del Grosso
+/// @copyright 2023 The Open-Agriculture Developers
 //================================================================================================
 #ifndef ISOBUS_LANGUAGE_COMMAND_INTERFACE_HPP
 #define ISOBUS_LANGUAGE_COMMAND_INTERFACE_HPP
@@ -166,6 +166,10 @@ namespace isobus
 		/// @param[in] filteredControlFunction The new partner to communicate with
 		void set_partner(std::shared_ptr<PartneredControlFunction> filteredControlFunction);
 
+		/// @brief Returns the current partner being used by the interface
+		/// @return The current partner being used by the interface, or nullptr if none
+		std::shared_ptr<PartneredControlFunction> get_partner() const;
+
 		/// @brief Returns if initialize has been called yet
 		/// @return `true` if initialize has been called, otherwise false
 		bool get_initialized() const;
@@ -178,7 +182,7 @@ namespace isobus
 		/// @brief Sends a language command based on the current content of this class as a broadcast.
 		/// @note This is only meant to be used by a VT server or TC/DL server
 		/// @return `true` if the message was sent, otherwise `false`
-		bool send_language_command() const;
+		bool send_language_command();
 
 		/// @brief Returns the commanded country code parsed from the last language command specifying the operator's desired language dialect.
 		/// @note ISO 11783 networks shall use the alpha-2 country codes in accordance with ISO 3166-1.
