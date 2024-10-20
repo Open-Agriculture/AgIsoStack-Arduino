@@ -4,7 +4,7 @@
 /// @brief A class to manage a client connection to a ISOBUS virtual terminal display
 /// @author Adrian Del Grosso
 ///
-/// @copyright 2022 Adrian Del Grosso
+/// @copyright 2022 The Open-Agriculture Developers
 //================================================================================================
 #ifndef ISOBUS_VIRTUAL_TERMINAL_CLIENT_HPP
 #define ISOBUS_VIRTUAL_TERMINAL_CLIENT_HPP
@@ -15,6 +15,7 @@
 #include "isobus_virtual_terminal_objects.hpp"
 #include "event_dispatcher.hpp"
 #include "processing_flags.hpp"
+#include "thread_synchronization.hpp"
 
 #include <functional>
 #include <map>
@@ -23,7 +24,6 @@
 #include <vector>
 
 #if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
-#include <mutex>
 #include <thread>
 #endif
 
@@ -1648,9 +1648,7 @@ namespace isobus
 		std::vector<std::vector<std::uint8_t>> commandQueue; ///< A queue of commands to send to the VT server
 		bool commandAwaitingResponse = false; ///< Determines if we are currently waiting for a response to a command
 		std::uint32_t lastCommandTimestamp_ms = 0; ///< The timestamp of the last command sent
-#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
-		std::mutex commandQueueMutex; ///< A mutex to protect the command queue
-#endif
+		Mutex commandQueueMutex; ///< A mutex to protect the command queue
 
 		// Activation event callbacks
 		EventDispatcher<VTKeyEvent> softKeyEventDispatcher; ///< A list of all soft key event callbacks

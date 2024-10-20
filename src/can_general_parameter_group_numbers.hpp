@@ -4,7 +4,7 @@
 /// @brief Defines some PGNs that are used in the library or are very common
 /// @author Adrian Del Grosso
 ///
-/// @copyright 2022 Adrian Del Grosso
+/// @copyright 2022 The Open-Agriculture Developers
 //================================================================================================
 
 #ifndef CAN_GENERAL_PARAMETER_GROUP_NUMBERS_HPP
@@ -33,6 +33,7 @@ namespace isobus
 		AddressClaim = 0xEE00,
 		ProprietaryA = 0xEF00,
 		MachineSelectedSpeed = 0xF022,
+		HeartbeatMessage = 0xF0E4,
 		ProductIdentification = 0xFC8D,
 		ControlFunctionFunctionalities = 0xFC8E,
 		DiagnosticProtocolIdentification = 0xFD32,
@@ -50,6 +51,7 @@ namespace isobus
 		CommandedAddress = 0xFED8,
 		SoftwareIdentification = 0xFEDA,
 		AllImplementsStopOperationsSwitchState = 0xFD02,
+		TimeDate = 0xFEE6,
 		VesselHeading = 0x1F112,
 		RateOfTurn = 0x1F113,
 		PositionRapidUpdate = 0x1F801,

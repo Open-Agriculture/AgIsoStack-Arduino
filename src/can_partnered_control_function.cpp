@@ -6,33 +6,23 @@
 /// @author Adrian Del Grosso
 /// @author Daan Steenbergen
 ///
-/// @copyright 2022 Adrian Del Grosso
+/// @copyright 2022 The Open-Agriculture Developers
 //================================================================================================
 #include "can_partnered_control_function.hpp"
 
 #include "can_constants.hpp"
-#include "can_network_manager.hpp"
 
 #include <algorithm>
 #include <cassert>
 
 namespace isobus
 {
-	PartneredControlFunction::PartneredControlFunction(std::uint8_t CANPort, const std::vector<NAMEFilter> NAMEFilters, CANLibBadge<PartneredControlFunction>) :
+	PartneredControlFunction::PartneredControlFunction(std::uint8_t CANPort, const std::vector<NAMEFilter> NAMEFilters) :
 	  ControlFunction(NAME(0), NULL_CAN_ADDRESS, CANPort, Type::Partnered),
 	  NAMEFilterList(NAMEFilters)
 	{
-#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
-		const std::lock_guard<std::mutex> lock(ControlFunction::controlFunctionProcessingMutex);
-#endif
-	}
-
-	std::shared_ptr<PartneredControlFunction> PartneredControlFunction::create(std::uint8_t CANPort, const std::vector<NAMEFilter> NAMEFilters)
-	{
-		// Unfortunately, we can't use `std::make_shared` here because the constructor is meant to be protected
-		auto controlFunction = std::shared_ptr<PartneredControlFunction>(new PartneredControlFunction(CANPort, NAMEFilters, {}));
-		CANNetworkManager::CANNetwork.on_control_function_created(controlFunction, CANLibBadge<PartneredControlFunction>());
-		return controlFunction;
+		auto &processingMutex = ControlFunction::controlFunctionProcessingMutex;
+		LOCK_GUARD(Mutex, processingMutex);
 	}
 
 	void PartneredControlFunction::add_parameter_group_number_callback(std::uint32_t parameterGroupNumber, CANLibCallback callback, void *parent, std::shared_ptr<InternalControlFunction> internalControlFunction)

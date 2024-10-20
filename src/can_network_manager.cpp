@@ -6,7 +6,7 @@
 /// @author Adrian Del Grosso
 /// @author Daan Steenbergen
 ///
-/// @copyright 2022 Adrian Del Grosso
+/// @copyright 2022 The Open-Agriculture Developers
 //================================================================================================
 
 #include "can_network_manager.hpp"
@@ -14,8 +14,8 @@
 #include "can_general_parameter_group_numbers.hpp"
 #include "can_hardware_abstraction.hpp"
 #include "can_message.hpp"
+#include "can_parameter_group_number_request_protocol.hpp"
 #include "can_partnered_control_function.hpp"
-#include "can_protocol.hpp"
 #include "can_stack_logger.hpp"
 #include "system_timing.hpp"
 #include "to_string.hpp"
@@ -43,9 +43,35 @@ namespace isobus
 		initialized = true;
 	}
 
-	std::shared_ptr<ControlFunction> CANNetworkManager::get_control_function(std::uint8_t channelIndex, std::uint8_t address, CANLibBadge<AddressClaimStateMachine>) const
+	std::shared_ptr<InternalControlFunction> CANNetworkManager::create_internal_control_function(NAME desiredName, std::uint8_t CANPort, std::uint8_t preferredAddress)
 	{
-		return get_control_function(channelIndex, address);
+		auto controlFunction = std::make_shared<InternalControlFunction>(desiredName, preferredAddress, CANPort);
+		controlFunction->pgnRequestProtocol.reset(new ParameterGroupNumberRequestProtocol(controlFunction));
+		internalControlFunctions.push_back(controlFunction);
+		heartBeatInterfaces.at(CANPort)->on_new_internal_control_function(controlFunction);
+		return controlFunction;
+	}
+
+	std::shared_ptr<PartneredControlFunction> CANNetworkManager::create_partnered_control_function(std::uint8_t CANPort, const std::vector<NAMEFilter> NAMEFilters)
+	{
+		auto controlFunction = std::make_shared<PartneredControlFunction>(CANPort, NAMEFilters);
+		partneredControlFunctions.push_back(controlFunction);
+		return controlFunction;
+	}
+
+	void CANNetworkManager::deactivate_control_function(std::shared_ptr<InternalControlFunction> controlFunction)
+	{
+		// We need to unregister the control function from the interfaces managed by the network manager first.
+		controlFunction->pgnRequestProtocol.reset();
+		heartBeatInterfaces.at(controlFunction->get_can_port())->on_destroyed_internal_control_function(controlFunction);
+		internalControlFunctions.erase(std::remove(internalControlFunctions.begin(), internalControlFunctions.end(), controlFunction), internalControlFunctions.end());
+		deactivate_control_function(std::static_pointer_cast<ControlFunction>(controlFunction));
+	}
+
+	void CANNetworkManager::deactivate_control_function(std::shared_ptr<PartneredControlFunction> controlFunction)
+	{
+		partneredControlFunctions.erase(std::remove(partneredControlFunctions.begin(), partneredControlFunctions.end(), controlFunction), partneredControlFunctions.end());
+		deactivate_control_function(std::static_pointer_cast<ControlFunction>(controlFunction));
 	}
 
 	void CANNetworkManager::add_global_parameter_group_number_callback(std::uint32_t parameterGroupNumber, CANLibCallback callback, void *parent)
@@ -70,18 +96,14 @@ namespace isobus
 
 	void CANNetworkManager::add_any_control_function_parameter_group_number_callback(std::uint32_t parameterGroupNumber, CANLibCallback callback, void *parent)
 	{
-#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
-		std::lock_guard<std::mutex> lock(anyControlFunctionCallbacksMutex);
-#endif
+		LOCK_GUARD(Mutex, anyControlFunctionCallbacksMutex);
 		anyControlFunctionParameterGroupNumberCallbacks.emplace_back(parameterGroupNumber, callback, parent, nullptr);
 	}
 
 	void CANNetworkManager::remove_any_control_function_parameter_group_number_callback(std::uint32_t parameterGroupNumber, CANLibCallback callback, void *parent)
 	{
 		ParameterGroupNumberCallbackData tempObject(parameterGroupNumber, callback, parent, nullptr);
-#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
-		std::lock_guard<std::mutex> lock(anyControlFunctionCallbacksMutex);
-#endif
+		LOCK_GUARD(Mutex, anyControlFunctionCallbacksMutex);
 		auto callbackLocation = std::find(anyControlFunctionParameterGroupNumberCallbacks.begin(), anyControlFunctionParameterGroupNumberCallbacks.end(), tempObject);
 		if (anyControlFunctionParameterGroupNumberCallbacks.end() != callbackLocation)
 		{
@@ -108,9 +130,7 @@ namespace isobus
 
 	float CANNetworkManager::get_estimated_busload(std::uint8_t canChannel)
 	{
-#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
-		const std::lock_guard<std::mutex> lock(busloadUpdateMutex);
-#endif
+		LOCK_GUARD(Mutex, busloadUpdateMutex);
 		constexpr float ISOBUS_BAUD_RATE_BPS = 250000.0f;
 		float retVal = 0.0f;
 
@@ -172,31 +192,6 @@ namespace isobus
 				// Successfully sent via the extended transport protocol
 				retVal = true;
 			}
-			else
-			{
-				//! @todo convert the other protocols to stop using the abstract protocollib class
-				CANLibProtocol *currentProtocol;
-				// See if any transport layer protocol can handle this message
-				for (std::uint32_t i = 0; i < CANLibProtocol::get_number_protocols(); i++)
-				{
-					if (CANLibProtocol::get_protocol(i, currentProtocol))
-					{
-						retVal = currentProtocol->protocol_transmit_message(parameterGroupNumber,
-						                                                    dataBuffer,
-						                                                    dataLength,
-						                                                    sourceControlFunction,
-						                                                    destinationControlFunction,
-						                                                    transmitCompleteCallback,
-						                                                    parentPointer,
-						                                                    frameChunkCallback);
-
-						if (retVal)
-						{
-							break;
-						}
-					}
-				}
-			}
 
 			//! @todo Allow sending 8 byte message with the frameChunkCallback
 			if ((!retVal) &&
@@ -225,9 +220,8 @@ namespace isobus
 
 	void CANNetworkManager::update()
 	{
-#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
-		const std::lock_guard<std::mutex> lock(ControlFunction::controlFunctionProcessingMutex);
-#endif
+		auto &processingMutex = ControlFunction::controlFunctionProcessingMutex;
+		LOCK_GUARD(Mutex, processingMutex);
 
 		if (!initialized)
 		{
@@ -237,6 +231,14 @@ namespace isobus
 		update_new_partners();
 
 		process_rx_messages();
+
+		// Update ISOBUS heartbeats (should be done before process_tx_messages
+		// to minimize latency in safety critical paths)
+		for (std::uint32_t i = 0; i < CAN_PORT_MAXIMUM; i++)
+		{
+			heartBeatInterfaces.at(i)->update();
+		}
+
 		process_tx_messages();
 
 		update_internal_cfs();
@@ -248,20 +250,7 @@ namespace isobus
 		{
 			transportProtocols[i]->update();
 			extendedTransportProtocols[i]->update();
-		}
-
-		for (std::size_t i = 0; i < CANLibProtocol::get_number_protocols(); i++)
-		{
-			CANLibProtocol *currentProtocol = nullptr;
-
-			if (CANLibProtocol::get_protocol(i, currentProtocol))
-			{
-				if (!currentProtocol->get_is_initialized())
-				{
-					currentProtocol->initialize({});
-				}
-				currentProtocol->update({});
-			}
+			fastPacketProtocol[i]->update();
 		}
 		update_busload_history();
 		updateTimestamp_ms = SystemTiming::get_timestamp_ms();
@@ -274,7 +263,7 @@ namespace isobus
 	                                             std::uint8_t priority,
 	                                             const void *data,
 	                                             std::uint32_t size,
-	                                             CANLibBadge<AddressClaimStateMachine>) const
+	                                             CANLibBadge<InternalControlFunction>) const
 	{
 		return send_can_message_raw(portIndex, sourceAddress, destAddress, parameterGroupNumber, priority, data, size);
 	}
@@ -322,9 +311,7 @@ namespace isobus
 
 		if (initialized)
 		{
-#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
-			std::lock_guard<std::mutex> lock(receivedMessageQueueMutex);
-#endif
+			LOCK_GUARD(Mutex, receivedMessageQueueMutex);
 			receivedMessageQueue.push(std::move(message));
 		}
 	}
@@ -349,17 +336,8 @@ namespace isobus
 		}
 	}
 
-	void CANNetworkManager::on_control_function_destroyed(std::shared_ptr<ControlFunction> controlFunction, CANLibBadge<ControlFunction>)
+	void CANNetworkManager::deactivate_control_function(std::shared_ptr<ControlFunction> controlFunction)
 	{
-		if (ControlFunction::Type::Internal == controlFunction->get_type())
-		{
-			internalControlFunctions.erase(std::remove(internalControlFunctions.begin(), internalControlFunctions.end(), controlFunction), internalControlFunctions.end());
-		}
-		else if (ControlFunction::Type::Partnered == controlFunction->get_type())
-		{
-			partneredControlFunctions.erase(std::remove(partneredControlFunctions.begin(), partneredControlFunctions.end(), controlFunction), partneredControlFunctions.end());
-		}
-
 		auto result = std::find(inactiveControlFunctions.begin(), inactiveControlFunctions.end(), controlFunction);
 		if (result != inactiveControlFunctions.end())
 		{
@@ -372,49 +350,31 @@ namespace isobus
 			{
 				if (i != controlFunction->get_address())
 				{
-					CANStackLogger::warn("[NM]: %s control function with address '%d' was at incorrect address '%d' in the lookup table prior to deletion.", controlFunction->get_type_string().c_str(), controlFunction->get_address(), i);
+					LOG_WARNING("[NM]: %s control function with address '%d' was at incorrect address '%d' in the lookup table prior to deactivation.",
+					            controlFunction->get_type_string().c_str(),
+					            controlFunction->get_address(),
+					            i);
 				}
 
-				if (controlFunction->get_address() < NULL_CAN_ADDRESS)
+				controlFunctionTable[controlFunction->get_can_port()][i] = nullptr;
+
+				if (controlFunction->get_address_valid() && (ControlFunction::Type::Partnered == controlFunction->get_type()))
 				{
-					if (initialized)
-					{
-						// The control function was active, replace it with an new external control function
-						controlFunctionTable[controlFunction->get_can_port()][controlFunction->address] = ControlFunction::create(controlFunction->get_NAME(), controlFunction->get_address(), controlFunction->get_can_port());
-					}
-					else
-					{
-						// The network manager is not initialized yet, just remove the control function from the table
-						controlFunctionTable[controlFunction->get_can_port()][i] = nullptr;
-					}
+					// The control function was an active partner when deleted, so we replace it with an new external control function instead
+					create_external_control_function(controlFunction->get_NAME(), controlFunction->get_address(), controlFunction->get_can_port());
 				}
 			}
 		}
-		CANStackLogger::info("[NM]: %s control function with address '%d' is deleted.", controlFunction->get_type_string().c_str(), controlFunction->get_address());
-	}
-
-	void CANNetworkManager::on_control_function_created(std::shared_ptr<ControlFunction> controlFunction, CANLibBadge<ControlFunction>)
-	{
-		on_control_function_created(controlFunction);
-	}
-
-	void CANNetworkManager::on_control_function_created(std::shared_ptr<ControlFunction> controlFunction, CANLibBadge<InternalControlFunction>)
-	{
-		on_control_function_created(controlFunction);
-	}
-
-	void CANNetworkManager::on_control_function_created(std::shared_ptr<ControlFunction> controlFunction, CANLibBadge<PartneredControlFunction>)
-	{
-		on_control_function_created(controlFunction);
+		LOG_DEBUG("[NM]: %s control function at address '%d' is deactivated.",
+		          controlFunction->get_type_string().c_str(),
+		          controlFunction->get_address());
 	}
 
 	void CANNetworkManager::add_control_function_status_change_callback(ControlFunctionStateCallback callback)
 	{
 		if (nullptr != callback)
 		{
-#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
-			const std::lock_guard<std::mutex> lock(controlFunctionStatusCallbacksMutex);
-#endif
+			LOCK_GUARD(Mutex, controlFunctionStatusCallbacksMutex);
 			controlFunctionStateCallbacks.emplace_back(callback);
 		}
 	}
@@ -423,9 +383,7 @@ namespace isobus
 	{
 		if (nullptr != callback)
 		{
-#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
-			const std::lock_guard<std::mutex> lock(controlFunctionStatusCallbacksMutex);
-#endif
+			LOCK_GUARD(Mutex, controlFunctionStatusCallbacksMutex);
 			ControlFunctionStateCallback targetCallback(callback);
 			auto callbackLocation = std::find(controlFunctionStateCallbacks.begin(), controlFunctionStateCallbacks.end(), targetCallback);
 
@@ -477,9 +435,15 @@ namespace isobus
 		return retVal;
 	}
 
-	FastPacketProtocol &CANNetworkManager::get_fast_packet_protocol()
+	std::unique_ptr<FastPacketProtocol> &CANNetworkManager::get_fast_packet_protocol(std::uint8_t canPortIndex)
 	{
-		return fastPacketProtocol;
+		return fastPacketProtocol[canPortIndex];
+	}
+
+	HeartbeatInterface &CANNetworkManager::get_heartbeat_interface(std::uint8_t canPortIndex)
+	{
+		assert(canPortIndex < CAN_PORT_MAXIMUM); // You passed in an out of range index!
+		return *heartBeatInterfaces.at(canPortIndex);
 	}
 
 	CANNetworkConfiguration &CANNetworkManager::get_configuration()
@@ -496,9 +460,7 @@ namespace isobus
 	{
 		bool retVal = false;
 		ParameterGroupNumberCallbackData callbackInfo(parameterGroupNumber, callback, parentPointer, nullptr);
-#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
-		const std::lock_guard<std::mutex> lock(protocolPGNCallbacksMutex);
-#endif
+		LOCK_GUARD(Mutex, protocolPGNCallbacksMutex);
 		if ((nullptr != callback) && (protocolPGNCallbacks.end() == find(protocolPGNCallbacks.begin(), protocolPGNCallbacks.end(), callbackInfo)))
 		{
 			protocolPGNCallbacks.push_back(callbackInfo);
@@ -511,9 +473,7 @@ namespace isobus
 	{
 		bool retVal = false;
 		ParameterGroupNumberCallbackData callbackInfo(parameterGroupNumber, callback, parentPointer, nullptr);
-#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
-		const std::lock_guard<std::mutex> lock(protocolPGNCallbacksMutex);
-#endif
+		LOCK_GUARD(Mutex, protocolPGNCallbacksMutex);
 		if (nullptr != callback)
 		{
 			std::list<ParameterGroupNumberCallbackData>::iterator callbackLocation;
@@ -552,9 +512,21 @@ namespace isobus
 				                       i);
 				this->protocol_message_callback(message);
 			};
-			transportProtocols[i].reset(new TransportProtocolManager(send_frame_callback, receive_message_callback, &configuration));
-			extendedTransportProtocols[i].reset(new ExtendedTransportProtocolManager(send_frame_callback, receive_message_callback, &configuration));
+			transportProtocols.at(i).reset(new TransportProtocolManager(send_frame_callback, receive_message_callback, &configuration));
+			extendedTransportProtocols.at(i).reset(new ExtendedTransportProtocolManager(send_frame_callback, receive_message_callback, &configuration));
+			fastPacketProtocol.at(i).reset(new FastPacketProtocol(send_frame_callback));
+			heartBeatInterfaces.at(i).reset(new HeartbeatInterface(send_frame_callback));
 		}
+	}
+
+	std::shared_ptr<ControlFunction> CANNetworkManager::create_external_control_function(NAME desiredName, std::uint8_t address, std::uint8_t CANPort)
+	{
+		auto controlFunction = std::make_shared<ControlFunction>(desiredName, address, CANPort, ControlFunction::Type::External);
+		if ((CANPort < CAN_PORT_MAXIMUM) && (address < NULL_CAN_ADDRESS))
+		{
+			controlFunctionTable[CANPort][address] = controlFunction;
+		}
+		return controlFunction;
 	}
 
 	void CANNetworkManager::update_address_table(const CANMessage &message)
@@ -573,11 +545,11 @@ namespace isobus
 				// Need to evict them from the table and move them to the inactive list
 				targetControlFunction->address = NULL_CAN_ADDRESS;
 				inactiveControlFunctions.push_back(targetControlFunction);
-				CANStackLogger::info("[NM]: %s CF '%016llx' is evicted from address '%d' on channel '%d', as their address is probably stolen.",
-				                     targetControlFunction->get_type_string().c_str(),
-				                     targetControlFunction->get_NAME().get_full_name(),
-				                     claimedAddress,
-				                     channelIndex);
+				LOG_INFO("[NM]: %s CF '%016llx' is evicted from address '%d' on channel '%d', as their address is probably stolen.",
+				         targetControlFunction->get_type_string().c_str(),
+				         targetControlFunction->get_NAME().get_full_name(),
+				         claimedAddress,
+				         channelIndex);
 				targetControlFunction = nullptr;
 			}
 
@@ -594,11 +566,11 @@ namespace isobus
 					    (currentControlFunction->get_can_port() == channelIndex))
 					{
 						controlFunctionTable[channelIndex][claimedAddress] = currentControlFunction;
-						CANStackLogger::debug("[NM]: %s CF '%016llx' is now active at address '%d' on channel '%d'.",
-						                      currentControlFunction->get_type_string().c_str(),
-						                      currentControlFunction->get_NAME().get_full_name(),
-						                      claimedAddress,
-						                      channelIndex);
+						LOG_DEBUG("[NM]: %s CF '%016llx' is now active at address '%d' on channel '%d'.",
+						          currentControlFunction->get_type_string().c_str(),
+						          currentControlFunction->get_NAME().get_full_name(),
+						          claimedAddress,
+						          channelIndex);
 						process_control_function_state_change_callback(currentControlFunction, ControlFunctionState::Online);
 						break;
 					}
@@ -636,7 +608,7 @@ namespace isobus
 	{
 		for (const auto &currentInternalControlFunction : internalControlFunctions)
 		{
-			if (currentInternalControlFunction->update_address_claiming({}))
+			if (currentInternalControlFunction->update_address_claiming())
 			{
 				std::uint8_t channelIndex = currentInternalControlFunction->get_can_port();
 				std::uint8_t claimedAddress = currentInternalControlFunction->get_address();
@@ -665,19 +637,23 @@ namespace isobus
 		}
 	}
 
+	void CANNetworkManager::process_rx_message_for_address_claiming(const CANMessage &message)
+	{
+		for (const auto &internalCF : internalControlFunctions)
+		{
+			internalCF->process_rx_message_for_address_claiming(message);
+		}
+	}
+
 	void CANNetworkManager::update_busload(std::uint8_t channelIndex, std::uint32_t numberOfBitsProcessed)
 	{
-#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
-		const std::lock_guard<std::mutex> lock(CANNetworkManager::CANNetwork.busloadUpdateMutex);
-#endif
+		LOCK_GUARD(Mutex, busloadUpdateMutex);
 		currentBusloadBitAccumulator.at(channelIndex) += numberOfBitsProcessed;
 	}
 
 	void CANNetworkManager::update_busload_history()
 	{
-#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
-		const std::lock_guard<std::mutex> lock(busloadUpdateMutex);
-#endif
+		LOCK_GUARD(Mutex, busloadUpdateMutex);
 		if (SystemTiming::time_expired_ms(busloadUpdateTimestamp_ms, BUSLOAD_UPDATE_FREQUENCY_MS))
 		{
 			for (std::size_t i = 0; i < busloadMessageBitsHistory.size(); i++)
@@ -717,7 +693,7 @@ namespace isobus
 			auto activeResult = std::find_if(controlFunctionTable[rxFrame.channel].begin(),
 			                                 controlFunctionTable[rxFrame.channel].end(),
 			                                 [claimedNAME](const std::shared_ptr<ControlFunction> &cf) {
-				                                 return (nullptr != cf) && (cf->controlFunctionNAME.get_full_name() == claimedNAME);
+				                                 return (nullptr != cf) && (cf->get_NAME().get_full_name() == claimedNAME);
 			                                 });
 			if (activeResult != controlFunctionTable[rxFrame.channel].end())
 			{
@@ -728,7 +704,7 @@ namespace isobus
 				auto inActiveResult = std::find_if(inactiveControlFunctions.begin(),
 				                                   inactiveControlFunctions.end(),
 				                                   [claimedNAME, &rxFrame](const std::shared_ptr<ControlFunction> &cf) {
-					                                   return (cf->controlFunctionNAME.get_full_name() == claimedNAME) && (cf->get_can_port() == rxFrame.channel);
+					                                   return (cf->get_NAME().get_full_name() == claimedNAME) && (cf->get_can_port() == rxFrame.channel);
 				                                   });
 				if (inActiveResult != inactiveControlFunctions.end())
 				{
@@ -757,43 +733,42 @@ namespace isobus
 			std::for_each(controlFunctionTable[rxFrame.channel].begin(),
 			              controlFunctionTable[rxFrame.channel].end(),
 			              [&foundControlFunction, &claimedAddress](const std::shared_ptr<ControlFunction> &cf) {
-				              if ((nullptr != cf) && (foundControlFunction != cf) && (cf->address == claimedAddress))
+				              if ((nullptr != cf) && (foundControlFunction != cf) && (cf->get_address() == claimedAddress))
 					              cf->address = CANIdentifier::NULL_ADDRESS;
 			              });
 
 			std::for_each(inactiveControlFunctions.begin(),
 			              inactiveControlFunctions.end(),
 			              [&rxFrame, &foundControlFunction, &claimedAddress](const std::shared_ptr<ControlFunction> &cf) {
-				              if ((foundControlFunction != cf) && (cf->address == claimedAddress) && (cf->get_can_port() == rxFrame.channel))
+				              if ((foundControlFunction != cf) && (cf->get_address() == claimedAddress) && (cf->get_can_port() == rxFrame.channel))
 					              cf->address = CANIdentifier::NULL_ADDRESS;
 			              });
 
 			if (nullptr == foundControlFunction)
 			{
 				// New device, need to start keeping track of it
-				foundControlFunction = ControlFunction::create(NAME(claimedNAME), claimedAddress, rxFrame.channel);
-				controlFunctionTable[rxFrame.channel][foundControlFunction->get_address()] = foundControlFunction;
-				CANStackLogger::debug("[NM]: A control function claimed address %u on channel %u", foundControlFunction->get_address(), foundControlFunction->get_can_port());
+				foundControlFunction = create_external_control_function(NAME(claimedNAME), claimedAddress, rxFrame.channel);
+				LOG_DEBUG("[NM]: A control function claimed address %u on channel %u", foundControlFunction->get_address(), foundControlFunction->get_can_port());
 			}
-			else if (foundControlFunction->address != claimedAddress)
+			else if (foundControlFunction->get_address() != claimedAddress)
 			{
 				if (foundControlFunction->get_address_valid())
 				{
 					controlFunctionTable[rxFrame.channel][claimedAddress] = foundControlFunction;
 					controlFunctionTable[rxFrame.channel][foundControlFunction->get_address()] = nullptr;
-					CANStackLogger::info("[NM]: The %s control function at address %d changed it's address to %d on channel %u.",
-					                     foundControlFunction->get_type_string().c_str(),
-					                     foundControlFunction->get_address(),
-					                     claimedAddress,
-					                     foundControlFunction->get_can_port());
+					LOG_INFO("[NM]: The %s control function at address %d changed it's address to %d on channel %u.",
+					         foundControlFunction->get_type_string().c_str(),
+					         foundControlFunction->get_address(),
+					         claimedAddress,
+					         foundControlFunction->get_can_port());
 				}
 				else
 				{
-					CANStackLogger::info("[NM]: %s control function with name %016llx has claimed address %u on channel %u.",
-					                     foundControlFunction->get_type_string().c_str(),
-					                     foundControlFunction->get_NAME().get_full_name(),
-					                     claimedAddress,
-					                     foundControlFunction->get_can_port());
+					LOG_INFO("[NM]: %s control function with name %016llx has claimed address %u on channel %u.",
+					         foundControlFunction->get_type_string().c_str(),
+					         foundControlFunction->get_NAME().get_full_name(),
+					         claimedAddress,
+					         foundControlFunction->get_can_port());
 					process_control_function_state_change_callback(foundControlFunction, ControlFunctionState::Online);
 				}
 				foundControlFunction->address = claimedAddress;
@@ -826,17 +801,17 @@ namespace isobus
 					    (ControlFunction::Type::External == currentActiveControlFunction->get_type()))
 					{
 						// This CF matches the filter and is not an internal or already partnered CF
-						CANStackLogger::info("[NM]: A partner with name %016llx has claimed address %u on channel %u.",
-						                     partner->get_NAME().get_full_name(),
-						                     partner->get_address(),
-						                     partner->get_can_port());
-
 						// Populate the partner's data
 						partner->address = currentActiveControlFunction->get_address();
 						partner->controlFunctionNAME = currentActiveControlFunction->get_NAME();
 						partner->initialized = true;
 						controlFunctionTable[partner->get_can_port()][partner->address] = std::shared_ptr<ControlFunction>(partner);
 						process_control_function_state_change_callback(partner, ControlFunctionState::Online);
+
+						LOG_INFO("[NM]: A partner with name %016llx has claimed address %u on channel %u.",
+						         partner->get_NAME().get_full_name(),
+						         partner->get_address(),
+						         partner->get_can_port());
 						break;
 					}
 				}
@@ -885,10 +860,10 @@ namespace isobus
 				}
 				else
 				{
-					CANStackLogger::warn("[NM]: Cannot send a message with PGN " +
-					                     isobus::to_string(static_cast<int>(parameterGroupNumber)) +
-					                     " as a destination specific message. " +
-					                     "Try resending it using nullptr as your destination control function.");
+					LOG_WARNING("[NM]: Cannot send a message with PGN " +
+					            isobus::to_string(static_cast<int>(parameterGroupNumber)) +
+					            " as a destination specific message. " +
+					            "Try resending it using nullptr as your destination control function.");
 					identifier = DEFAULT_IDENTIFIER;
 				}
 			}
@@ -918,9 +893,7 @@ namespace isobus
 
 	CANMessage CANNetworkManager::get_next_can_message_from_rx_queue()
 	{
-#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
-		std::lock_guard<std::mutex> lock(receivedMessageQueueMutex);
-#endif
+		LOCK_GUARD(Mutex, receivedMessageQueueMutex);
 		if (!receivedMessageQueue.empty())
 		{
 			CANMessage retVal = std::move(receivedMessageQueue.front());
@@ -942,23 +915,9 @@ namespace isobus
 		return CANMessage::create_invalid_message();
 	}
 
-	void CANNetworkManager::on_control_function_created(std::shared_ptr<ControlFunction> controlFunction)
-	{
-		if (ControlFunction::Type::Internal == controlFunction->get_type())
-		{
-			internalControlFunctions.push_back(std::static_pointer_cast<InternalControlFunction>(controlFunction));
-		}
-		else if (ControlFunction::Type::Partnered == controlFunction->get_type())
-		{
-			partneredControlFunctions.push_back(std::static_pointer_cast<PartneredControlFunction>(controlFunction));
-		}
-	}
-
 	void CANNetworkManager::process_any_control_function_pgn_callbacks(const CANMessage &currentMessage)
 	{
-#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
-		const std::lock_guard<std::mutex> lock(anyControlFunctionCallbacksMutex);
-#endif
+		LOCK_GUARD(Mutex, anyControlFunctionCallbacksMutex);
 		for (const auto &currentCallback : anyControlFunctionParameterGroupNumberCallbacks)
 		{
 			if ((currentCallback.get_parameter_group_number() == currentMessage.get_identifier().get_parameter_group_number()) &&
@@ -972,29 +931,19 @@ namespace isobus
 
 	void CANNetworkManager::process_can_message_for_address_violations(const CANMessage &currentMessage)
 	{
-		auto sourceAddress = currentMessage.get_identifier().get_source_address();
-
-		if ((BROADCAST_CAN_ADDRESS != sourceAddress) &&
-		    (NULL_CAN_ADDRESS != sourceAddress))
+		for (const auto &internalCF : internalControlFunctions)
 		{
-			for (auto &internalCF : internalControlFunctions)
+			if ((nullptr != internalCF) &&
+			    internalCF->process_rx_message_for_address_violation(currentMessage))
 			{
-				if ((nullptr != internalCF) &&
-				    (internalCF->get_address() == sourceAddress) &&
-				    (currentMessage.get_can_port_index() == internalCF->get_can_port()))
-				{
-					internalCF->on_address_violation({});
-					addressViolationEventDispatcher.call(internalCF);
-				}
+				addressViolationEventDispatcher.call(internalCF);
 			}
 		}
 	}
 
 	void CANNetworkManager::process_control_function_state_change_callback(std::shared_ptr<ControlFunction> controlFunction, ControlFunctionState state)
 	{
-#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
-		const std::lock_guard<std::mutex> lock(controlFunctionStatusCallbacksMutex);
-#endif
+		LOCK_GUARD(Mutex, controlFunctionStatusCallbacksMutex);
 		for (const auto &callback : controlFunctionStateCallbacks)
 		{
 			callback(controlFunction, state);
@@ -1003,9 +952,7 @@ namespace isobus
 
 	void CANNetworkManager::process_protocol_pgn_callbacks(const CANMessage &currentMessage)
 	{
-#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
-		const std::lock_guard<std::mutex> lock(protocolPGNCallbacksMutex);
-#endif
+		LOCK_GUARD(Mutex, protocolPGNCallbacksMutex);
 		for (const auto &currentCallback : protocolPGNCallbacks)
 		{
 			if (currentCallback.get_parameter_group_number() == currentMessage.get_identifier().get_parameter_group_number())
@@ -1059,27 +1006,6 @@ namespace isobus
 		}
 	}
 
-	void CANNetworkManager::process_can_message_for_commanded_address(const CANMessage &message)
-	{
-		constexpr std::uint8_t COMMANDED_ADDRESS_LENGTH = 9;
-
-		if ((nullptr == message.get_destination_control_function()) &&
-		    (static_cast<std::uint32_t>(CANLibParameterGroupNumber::CommandedAddress) == message.get_identifier().get_parameter_group_number()) &&
-		    (COMMANDED_ADDRESS_LENGTH == message.get_data_length()))
-		{
-			std::uint64_t targetNAME = message.get_uint64_at(0);
-
-			for (const auto &currentICF : internalControlFunctions)
-			{
-				if ((message.get_can_port_index() == currentICF->get_can_port()) &&
-				    (currentICF->get_NAME().get_full_name() == targetNAME))
-				{
-					currentICF->process_commanded_address(message.get_uint8_at(8), {});
-				}
-			}
-		}
-	}
-
 	void CANNetworkManager::process_rx_messages()
 	{
 		// We may miss a message without locking the mutex when checking if empty, but that's okay. It will be picked up on the next iteration
@@ -1089,10 +1015,13 @@ namespace isobus
 
 			update_address_table(currentMessage);
 			process_can_message_for_address_violations(currentMessage);
+			process_rx_message_for_address_claiming(currentMessage);
 
 			// Update Special Callbacks, like protocols and non-cf specific ones
-			transportProtocols[currentMessage.get_can_port_index()]->process_message(currentMessage);
-			extendedTransportProtocols[currentMessage.get_can_port_index()]->process_message(currentMessage);
+			transportProtocols.at(currentMessage.get_can_port_index())->process_message(currentMessage);
+			extendedTransportProtocols.at(currentMessage.get_can_port_index())->process_message(currentMessage);
+			fastPacketProtocol.at(currentMessage.get_can_port_index())->process_message(currentMessage);
+			heartBeatInterfaces.at(currentMessage.get_can_port_index())->process_rx_message(currentMessage);
 			process_protocol_pgn_callbacks(currentMessage);
 			process_any_control_function_pgn_callbacks(currentMessage);
 
@@ -1129,7 +1058,7 @@ namespace isobus
 					    (ControlFunction::Type::Internal != controlFunction->get_type()))
 					{
 						inactiveControlFunctions.push_back(controlFunction);
-						CANStackLogger::info("[NM]: Control function with address %u and NAME %016llx is now offline on channel %u.", controlFunction->get_address(), controlFunction->get_NAME(), channelIndex);
+						LOG_INFO("[NM]: Control function with address %u and NAME %016llx is now offline on channel %u.", controlFunction->get_address(), controlFunction->get_NAME(), channelIndex);
 						controlFunctionTable[channelIndex][i] = nullptr;
 						controlFunction->address = NULL_CAN_ADDRESS;
 						process_control_function_state_change_callback(controlFunction, ControlFunctionState::Offline);
@@ -1162,7 +1091,7 @@ namespace isobus
 	{
 		process_can_message_for_global_and_partner_callbacks(message);
 		process_any_control_function_pgn_callbacks(message);
-		process_can_message_for_commanded_address(message);
+		process_rx_message_for_address_claiming(message);
 	}
 
 } // namespace isobus

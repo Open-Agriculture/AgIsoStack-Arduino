@@ -16,7 +16,7 @@
 ///
 /// @author Adrian Del Grosso
 ///
-/// @copyright 2023 Adrian Del Grosso
+/// @copyright 2023 The Open-Agriculture Developers
 //================================================================================================
 #include "isobus_speed_distance_messages.hpp"
 #include "can_general_parameter_group_numbers.hpp"
@@ -419,7 +419,7 @@ namespace isobus
 		{
 			if (nullptr != machineSelectedSpeedCommandTransmitData.get_sender_control_function())
 			{
-				CANStackLogger::warn("[Speed/Distance]: Use extreme cation! You have configured an interface to command the speed of the machine. The machine may move without warning!");
+				LOG_WARNING("[Speed/Distance]: Use extreme cation! You have configured an interface to command the speed of the machine. The machine may move without warning!");
 			}
 			CANNetworkManager::CANNetwork.add_any_control_function_parameter_group_number_callback(static_cast<std::uint32_t>(CANLibParameterGroupNumber::MachineSelectedSpeed), process_rx_message, this);
 			CANNetworkManager::CANNetwork.add_any_control_function_parameter_group_number_callback(static_cast<std::uint32_t>(CANLibParameterGroupNumber::WheelBasedSpeedAndDistance), process_rx_message, this);
@@ -575,7 +575,7 @@ namespace isobus
 		}
 		else
 		{
-			CANStackLogger::error("[Speed/Distance]: ISOBUS speed messages interface has not been initialized yet.");
+			LOG_ERROR("[Speed/Distance]: ISOBUS speed messages interface has not been initialized yet.");
 		}
 	}
 
@@ -665,7 +665,7 @@ namespace isobus
 				}
 				else
 				{
-					CANStackLogger::error("[Speed/Distance]: Received a malformed machine selected speed. DLC must be 8.");
+					LOG_ERROR("[Speed/Distance]: Received a malformed machine selected speed. DLC must be 8.");
 				}
 			}
 			break;
@@ -706,7 +706,7 @@ namespace isobus
 				}
 				else
 				{
-					CANStackLogger::error("[Speed/Distance]: Received a malformed wheel-based speed and distance message. DLC must be 8.");
+					LOG_ERROR("[Speed/Distance]: Received a malformed wheel-based speed and distance message. DLC must be 8.");
 				}
 			}
 			break;
@@ -743,7 +743,7 @@ namespace isobus
 				}
 				else
 				{
-					CANStackLogger::error("[Speed/Distance]: Received a malformed ground-based speed and distance message. DLC must be 8.");
+					LOG_ERROR("[Speed/Distance]: Received a malformed ground-based speed and distance message. DLC must be 8.");
 				}
 			}
 			break;
@@ -780,7 +780,7 @@ namespace isobus
 				}
 				else
 				{
-					CANStackLogger::error("[Speed/Distance]: Received a malformed machine selected speed command message. DLC must be 8.");
+					LOG_ERROR("[Speed/Distance]: Received a malformed machine selected speed command message. DLC must be 8.");
 				}
 			}
 			break;

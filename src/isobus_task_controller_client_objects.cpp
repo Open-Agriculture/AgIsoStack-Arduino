@@ -4,7 +4,7 @@
 /// @brief Implements the base functionality of the basic task controller objects.
 /// @author Adrian Del Grosso
 ///
-/// @copyright 2023 Adrian Del Grosso
+/// @copyright 2023 The Open-Agriculture Developers
 //================================================================================================
 #include "isobus_task_controller_client_objects.hpp"
 
@@ -318,9 +318,9 @@ namespace isobus
 			return retVal;
 		}
 
-		std::size_t DeviceElementObject::get_number_child_objects() const
+		std::uint16_t DeviceElementObject::get_number_child_objects() const
 		{
-			return referenceList.size();
+			return static_cast<std::uint16_t>(referenceList.size());
 		}
 
 		std::uint16_t DeviceElementObject::get_child_object_id(std::size_t index)

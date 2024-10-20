@@ -1,3 +1,12 @@
+//================================================================================================
+/// @file isobus_maintain_power_interface.cpp
+///
+/// @brief Implements an interface for sending and receiving the maintain power message (PGN 65095).
+/// @author Adrian Del Grosso
+///
+/// @copyright 2023 The Open-Agriculture Developers
+//================================================================================================
+
 #include "isobus_maintain_power_interface.hpp"
 #include "can_general_parameter_group_numbers.hpp"
 #include "can_network_manager.hpp"
@@ -57,7 +66,7 @@ namespace isobus
 		}
 		else
 		{
-			CANStackLogger::error("[Maintain Power]: Interface has not been initialized yet.");
+			LOG_ERROR("[Maintain Power]: Interface has not been initialized yet.");
 		}
 	}
 
@@ -252,7 +261,7 @@ namespace isobus
 						{
 							if (0 != targetInterface->keyNotOffTimestamp)
 							{
-								CANStackLogger::info("[Maintain Power]: The key switch state has transitioned from NOT OFF to OFF.");
+								LOG_INFO("[Maintain Power]: The key switch state has transitioned from NOT OFF to OFF.");
 								targetInterface->keyNotOffTimestamp = 0;
 
 								// Send the maintain power message based on the key state transition
@@ -263,7 +272,7 @@ namespace isobus
 							}
 							else if (0 == targetInterface->keyOffTimestamp)
 							{
-								CANStackLogger::info("[Maintain Power]: The key switch state is detected as OFF.");
+								LOG_INFO("[Maintain Power]: The key switch state is detected as OFF.");
 								targetInterface->keyOffTimestamp = SystemTiming::get_timestamp_ms();
 							}
 						}
@@ -273,13 +282,13 @@ namespace isobus
 						{
 							if (0 != targetInterface->keyOffTimestamp)
 							{
-								CANStackLogger::info("[Maintain Power]: The key switch state has transitioned from OFF to NOT OFF.");
+								LOG_INFO("[Maintain Power]: The key switch state has transitioned from OFF to NOT OFF.");
 								targetInterface->keyOffTimestamp = 0;
 								targetInterface->keyNotOffTimestamp = SystemTiming::get_timestamp_ms();
 							}
 							else if (0 == targetInterface->keyNotOffTimestamp)
 							{
-								CANStackLogger::info("[Maintain Power]: The key switch state is detected as NOT OFF.");
+								LOG_INFO("[Maintain Power]: The key switch state is detected as NOT OFF.");
 								targetInterface->keyNotOffTimestamp = SystemTiming::get_timestamp_ms();
 							}
 							targetInterface->maintainPowerTransmitTimestamp_ms = 0;
@@ -288,7 +297,7 @@ namespace isobus
 
 						case KeySwitchState::Error:
 						{
-							CANStackLogger::warn("[Maintain Power]: The key switch is in an error state.");
+							LOG_WARNING("[Maintain Power]: The key switch is in an error state.");
 							targetInterface->keyOffTimestamp = 0;
 							targetInterface->keyNotOffTimestamp = 0;
 							targetInterface->maintainPowerTransmitTimestamp_ms = 0;
@@ -305,7 +314,7 @@ namespace isobus
 			}
 			else
 			{
-				CANStackLogger::warn("[Maintain Power]: Received malformed wheel based speed PGN. DLC must be 8.");
+				LOG_WARNING("[Maintain Power]: Received malformed wheel based speed PGN. DLC must be 8.");
 			}
 		}
 		else if (static_cast<std::uint32_t>(CANLibParameterGroupNumber::MaintainPower) == message.get_identifier().get_parameter_group_number())
@@ -343,7 +352,7 @@ namespace isobus
 			}
 			else
 			{
-				CANStackLogger::warn("[Maintain Power]: Received malformed maintain power PGN. DLC must be 8.");
+				LOG_WARNING("[Maintain Power]: Received malformed maintain power PGN. DLC must be 8.");
 			}
 		}
 	}

@@ -5,28 +5,22 @@
 /// @author Adrian Del Grosso
 /// @author Daan Steenbergen
 ///
-/// @copyright 2022 Adrian Del Grosso
+/// @copyright 2024 The Open-Agriculture Developers
 //================================================================================================
 
 #ifndef CAN_CONTROL_FUNCTION_HPP
 #define CAN_CONTROL_FUNCTION_HPP
 
 #include "can_NAME.hpp"
+#include "thread_synchronization.hpp"
 
 #include <memory>
-
-#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
-#include <mutex>
-#endif
+#include <string>
 
 namespace isobus
 {
-	//================================================================================================
-	/// @class ControlFunction
-	///
 	/// @brief A class that describes an ISO11783 control function, which includes a NAME and address.
-	//================================================================================================
-	class ControlFunction : public std::enable_shared_from_this<ControlFunction>
+	class ControlFunction
 	{
 	public:
 		/// @brief The type of the control function
@@ -37,19 +31,15 @@ namespace isobus
 			Partnered ///< An external control function that you explicitly want to talk to
 		};
 
-		virtual ~ControlFunction() = default;
-
-		/// @brief The factory function to construct a control function
+		/// @brief The constructor of a control function. In most cases use `CANNetworkManager::create_internal_control_function()` or
+		/// `CANNetworkManager::create_partnered_control_function()` instead, only use this constructor if you have advanced needs.
 		/// @param[in] NAMEValue The NAME of the control function
 		/// @param[in] addressValue The current address of the control function
 		/// @param[in] CANPort The CAN channel index that the control function communicates on
-		/// @returns A shared pointer to a ControlFunction object created with the parameters passed in
-		static std::shared_ptr<ControlFunction> create(NAME NAMEValue, std::uint8_t addressValue, std::uint8_t CANPort);
+		/// @param[in] type The 'Type' of control function to create
+		ControlFunction(NAME NAMEValue, std::uint8_t addressValue, std::uint8_t CANPort, Type type = Type::External);
 
-		/// @brief Destroys this control function, by removing it from the network manager
-		/// @param[in] expectedRefCount The expected number of shared pointers to this control function after removal
-		/// @returns true if the control function was successfully removed from everywhere in the stack, otherwise false
-		virtual bool destroy(std::uint32_t expectedRefCount = 1);
+		virtual ~ControlFunction() = default;
 
 		/// @brief Returns the current address of the control function
 		/// @returns The current address of the control function
@@ -76,17 +66,8 @@ namespace isobus
 		std::string get_type_string() const;
 
 	protected:
-		/// @brief The protected constructor for the control function, which is called by the (inherited) factory function
-		/// @param[in] NAMEValue The NAME of the control function
-		/// @param[in] addressValue The current address of the control function
-		/// @param[in] CANPort The CAN channel index that the control function communicates on
-		/// @param[in] type The 'Type' of control function to create
-		ControlFunction(NAME NAMEValue, std::uint8_t addressValue, std::uint8_t CANPort, Type type = Type::External);
-
 		friend class CANNetworkManager; ///< The network manager needs access to the control function's internals
-#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
-		static std::mutex controlFunctionProcessingMutex; ///< Protects the control function tables
-#endif
+		static Mutex controlFunctionProcessingMutex; ///< Protects the control function tables
 		const Type controlFunctionType; ///< The Type of the control function
 		NAME controlFunctionNAME; ///< The NAME of the control function
 		bool claimedAddressSinceLastAddressClaimRequest = false; ///< Used to mark CFs as stale if they don't claim within a certain time

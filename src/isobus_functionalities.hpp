@@ -8,22 +8,18 @@
 ///
 /// @author Adrian Del Grosso
 ///
-/// @copyright 2023 Adrian Del Grosso
+/// @copyright 2023 The Open-Agriculture Developers
 //================================================================================================
 #ifndef ISOBUS_FUNCTIONALITIES_HPP
 #define ISOBUS_FUNCTIONALITIES_HPP
 
 #include "can_internal_control_function.hpp"
 #include "can_parameter_group_number_request_protocol.hpp"
-#include "can_protocol.hpp"
 #include "processing_flags.hpp"
+#include "thread_synchronization.hpp"
 
 #include <list>
 #include <vector>
-
-#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
-#include <mutex>
-#endif
 
 namespace isobus
 {
@@ -473,9 +469,7 @@ namespace isobus
 		std::shared_ptr<InternalControlFunction> myControlFunction; ///< The control function to send messages as
 		std::list<FunctionalityData> supportedFunctionalities; ///< A list of all configured functionalities and their data
 		ProcessingFlags txFlags; ///< Handles retries for sending the CF functionalities message
-#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
-		std::mutex functionalitiesMutex; ///< Since messages come in on a different thread than the main app (probably), this mutex protects the functionality data
-#endif
+		Mutex functionalitiesMutex; ///< Since messages come in on a different thread than the main app (probably), this mutex protects the functionality data
 	};
 } // namespace isobus
 #endif // ISOBUS_FUNCTIONALITIES_HPP

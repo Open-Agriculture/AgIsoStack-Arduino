@@ -4,7 +4,7 @@
 /// @brief Implements VT server object pool objects.
 /// @author Adrian Del Grosso
 ///
-/// @copyright 2023 Adrian Del Grosso
+/// @copyright 2023 The Open-Agriculture Developers
 //================================================================================================
 #include "isobus_virtual_terminal_objects.hpp"
 
@@ -4933,6 +4933,19 @@ namespace isobus
 		return retVal;
 	}
 
+	bool OutputPolygon::change_point(std::uint8_t index, std::uint16_t x, std::uint16_t y)
+	{
+		bool retVal = false;
+
+		if (index < pointList.size())
+		{
+			pointList.at(index).xValue = x;
+			pointList.at(index).yValue = y;
+			retVal = true;
+		}
+		return retVal;
+	}
+
 	OutputPolygon::PolygonType OutputPolygon::get_type() const
 	{
 		return static_cast<PolygonType>(polygonType);
@@ -6338,7 +6351,10 @@ namespace isobus
 
 	void PictureGraphic::add_raw_data(std::uint8_t dataByte)
 	{
-		rawData.push_back(dataByte);
+		if (rawData.size() < (get_actual_width() * get_actual_height()))
+		{
+			rawData.push_back(dataByte);
+		}
 	}
 
 	std::uint32_t PictureGraphic::get_number_of_bytes_in_raw_data() const

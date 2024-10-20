@@ -4,14 +4,13 @@
 /// @brief A class to manage a client connection to a ISOBUS field computer's task controller
 /// @author Adrian Del Grosso
 ///
-/// @copyright 2023 Adrian Del Grosso
+/// @copyright 2023 The Open-Agriculture Developers
 //================================================================================================
 #include "isobus_task_controller_client.hpp"
 
 #include "can_general_parameter_group_numbers.hpp"
 #include "can_network_manager.hpp"
 #include "can_stack_logger.hpp"
-#include "isobus_virtual_terminal_client.hpp"
 #include "system_timing.hpp"
 #include "to_string.hpp"
 
@@ -19,11 +18,13 @@
 #include <array>
 #include <cassert>
 #include <cstring>
+#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
 #include <thread>
+#endif
 
 namespace isobus
 {
-	TaskControllerClient::TaskControllerClient(std::shared_ptr<PartneredControlFunction> partner, std::shared_ptr<InternalControlFunction> clientSource, std::shared_ptr<VirtualTerminalClient> primaryVT) :
+	TaskControllerClient::TaskControllerClient(std::shared_ptr<PartneredControlFunction> partner, std::shared_ptr<InternalControlFunction> clientSource, std::shared_ptr<PartneredControlFunction> primaryVT) :
 	  languageCommandInterface(clientSource, partner),
 	  partnerControlFunction(partner),
 	  myControlFunction(clientSource),
@@ -71,9 +72,7 @@ namespace isobus
 
 	void TaskControllerClient::add_request_value_callback(RequestValueCommandCallback callback, void *parentPointer)
 	{
-#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
-		const std::lock_guard<std::mutex> lock(clientMutex);
-#endif
+		LOCK_GUARD(Mutex, clientMutex);
 
 		RequestValueCommandCallbackInfo callbackData = { callback, parentPointer };
 		requestValueCallbacks.push_back(callbackData);
@@ -81,9 +80,7 @@ namespace isobus
 
 	void TaskControllerClient::add_value_command_callback(ValueCommandCallback callback, void *parentPointer)
 	{
-#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
-		const std::lock_guard<std::mutex> lock(clientMutex);
-#endif
+		LOCK_GUARD(Mutex, clientMutex);
 
 		ValueCommandCallbackInfo callbackData = { callback, parentPointer };
 		valueCommandsCallbacks.push_back(callbackData);
@@ -91,9 +88,7 @@ namespace isobus
 
 	void TaskControllerClient::remove_request_value_callback(RequestValueCommandCallback callback, void *parentPointer)
 	{
-#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
-		const std::lock_guard<std::mutex> lock(clientMutex);
-#endif
+		LOCK_GUARD(Mutex, clientMutex);
 
 		RequestValueCommandCallbackInfo callbackData = { callback, parentPointer };
 		auto callbackLocation = std::find(requestValueCallbacks.begin(), requestValueCallbacks.end(), callbackData);
@@ -106,9 +101,7 @@ namespace isobus
 
 	void TaskControllerClient::remove_value_command_callback(ValueCommandCallback callback, void *parentPointer)
 	{
-#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
-		const std::lock_guard<std::mutex> lock(clientMutex);
-#endif
+		LOCK_GUARD(Mutex, clientMutex);
 
 		ValueCommandCallbackInfo callbackData = { callback, parentPointer };
 		auto callbackLocation = std::find(valueCommandsCallbacks.begin(), valueCommandsCallbacks.end(), callbackData);
@@ -152,7 +145,7 @@ namespace isobus
 		else
 		{
 			// We don't want someone to erase our object pool or something while it is being used.
-			CANStackLogger::error("[TC]: Cannot reconfigure TC client while it is running!");
+			LOG_ERROR("[TC]: Cannot reconfigure TC client while it is running!");
 		}
 	}
 
@@ -190,7 +183,7 @@ namespace isobus
 		else
 		{
 			// We don't want someone to erase our object pool or something while it is being used.
-			CANStackLogger::error("[TC]: Cannot reconfigure TC client while it is running!");
+			LOG_ERROR("[TC]: Cannot reconfigure TC client while it is running!");
 		}
 	}
 
@@ -226,7 +219,7 @@ namespace isobus
 		else
 		{
 			// We don't want someone to erase our object pool or something while it is being used.
-			CANStackLogger::error("[TC]: Cannot reconfigure TC client while it is running!");
+			LOG_ERROR("[TC]: Cannot reconfigure TC client while it is running!");
 		}
 	}
 
@@ -234,9 +227,7 @@ namespace isobus
 	{
 		if (initialized)
 		{
-#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
-			const std::lock_guard<std::mutex> lock(clientMutex);
-#endif
+			LOCK_GUARD(Mutex, clientMutex);
 			set_state(StateMachineState::Disconnected);
 		}
 	}
@@ -333,9 +324,7 @@ namespace isobus
 	bool TaskControllerClient::reupload_device_descriptor_object_pool(std::shared_ptr<std::vector<std::uint8_t>> binaryDDOP)
 	{
 		bool retVal = false;
-#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
-		const std::lock_guard<std::mutex> lock(clientMutex);
-#endif
+		LOCK_GUARD(Mutex, clientMutex);
 
 		if (StateMachineState::Connected == get_state())
 		{
@@ -352,7 +341,7 @@ namespace isobus
 			set_state(StateMachineState::DeactivateObjectPool);
 			clear_queues();
 			retVal = true;
-			CANStackLogger::info("[TC]: Requested to change the DDOP. Object pool will be deactivated for a little while.");
+			LOG_INFO("[TC]: Requested to change the DDOP. Object pool will be deactivated for a little while.");
 		}
 		return retVal;
 	}
@@ -360,9 +349,7 @@ namespace isobus
 	bool TaskControllerClient::reupload_device_descriptor_object_pool(std::uint8_t const *binaryDDOP, std::uint32_t DDOPSize)
 	{
 		bool retVal = false;
-#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
-		const std::lock_guard<std::mutex> lock(clientMutex);
-#endif
+		LOCK_GUARD(Mutex, clientMutex);
 
 		if (StateMachineState::Connected == get_state())
 		{
@@ -379,7 +366,7 @@ namespace isobus
 			set_state(StateMachineState::DeactivateObjectPool);
 			clear_queues();
 			retVal = true;
-			CANStackLogger::info("[TC]: Requested to change the DDOP. Object pool will be deactivated for a little while.");
+			LOG_INFO("[TC]: Requested to change the DDOP. Object pool will be deactivated for a little while.");
 		}
 		return retVal;
 	}
@@ -387,9 +374,7 @@ namespace isobus
 	bool TaskControllerClient::reupload_device_descriptor_object_pool(std::shared_ptr<DeviceDescriptorObjectPool> DDOP)
 	{
 		bool retVal = false;
-#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
-		const std::lock_guard<std::mutex> lock(clientMutex);
-#endif
+		LOCK_GUARD(Mutex, clientMutex);
 
 		if (StateMachineState::Connected == get_state())
 		{
@@ -406,7 +391,7 @@ namespace isobus
 			set_state(StateMachineState::DeactivateObjectPool);
 			clear_queues();
 			retVal = true;
-			CANStackLogger::info("[TC]: Requested to change the DDOP. Object pool will be deactivated for a little while.");
+			LOG_INFO("[TC]: Requested to change the DDOP. Object pool will be deactivated for a little while.");
 		}
 		return retVal;
 	}
@@ -431,7 +416,7 @@ namespace isobus
 			{
 				if (SystemTiming::time_expired_ms(stateMachineTimestamp_ms, SIX_SECOND_TIMEOUT_MS))
 				{
-					CANStackLogger::debug("[TC]: Startup delay complete, waiting for TC server status message.");
+					LOG_DEBUG("[TC]: Startup delay complete, waiting for TC server status message.");
 					set_state(StateMachineState::WaitForServerStatusMessage);
 				}
 			}
@@ -445,7 +430,7 @@ namespace isobus
 				}
 				else if (SystemTiming::time_expired_ms(stateMachineTimestamp_ms, TWO_SECOND_TIMEOUT_MS))
 				{
-					CANStackLogger::error("[TC]: Timeout sending working set master message. Resetting client connection.");
+					LOG_ERROR("[TC]: Timeout sending working set master message. Resetting client connection.");
 					set_state(StateMachineState::Disconnected);
 				}
 			}
@@ -462,7 +447,7 @@ namespace isobus
 				}
 				else if (SystemTiming::time_expired_ms(stateMachineTimestamp_ms, TWO_SECOND_TIMEOUT_MS))
 				{
-					CANStackLogger::error("[TC]: Timeout sending first status message. Resetting client connection.");
+					LOG_ERROR("[TC]: Timeout sending first status message. Resetting client connection.");
 					set_state(StateMachineState::Disconnected);
 				}
 			}
@@ -476,7 +461,7 @@ namespace isobus
 				}
 				else if (SystemTiming::time_expired_ms(stateMachineTimestamp_ms, TWO_SECOND_TIMEOUT_MS))
 				{
-					CANStackLogger::error("[TC]: Timeout sending version request message. Resetting client connection.");
+					LOG_ERROR("[TC]: Timeout sending version request message. Resetting client connection.");
 					set_state(StateMachineState::Disconnected);
 				}
 			}
@@ -486,7 +471,7 @@ namespace isobus
 			{
 				if (SystemTiming::time_expired_ms(stateMachineTimestamp_ms, TWO_SECOND_TIMEOUT_MS))
 				{
-					CANStackLogger::error("[TC]: Timeout waiting for version request response. Resetting client connection.");
+					LOG_ERROR("[TC]: Timeout waiting for version request response. Resetting client connection.");
 					set_state(StateMachineState::Disconnected);
 				}
 			}
@@ -496,7 +481,8 @@ namespace isobus
 			{
 				if (SystemTiming::time_expired_ms(stateMachineTimestamp_ms, SIX_SECOND_TIMEOUT_MS))
 				{
-					CANStackLogger::warn("[TC]: Timeout waiting for version request from TC. This is not required, so proceeding anways.");
+					LOG_WARNING("[TC]: Timeout waiting for version request from TC. This is not required, so proceeding anways.");
+					select_language_command_partner();
 					set_state(StateMachineState::RequestLanguage);
 				}
 			}
@@ -506,11 +492,12 @@ namespace isobus
 			{
 				if (send_request_version_response())
 				{
+					select_language_command_partner();
 					set_state(StateMachineState::RequestLanguage);
 				}
 				else if (SystemTiming::time_expired_ms(stateMachineTimestamp_ms, TWO_SECOND_TIMEOUT_MS))
 				{
-					CANStackLogger::error("[TC]: Timeout sending version request response. Resetting client connection.");
+					LOG_ERROR("[TC]: Timeout sending version request response. Resetting client connection.");
 					set_state(StateMachineState::Disconnected);
 				}
 			}
@@ -518,26 +505,14 @@ namespace isobus
 
 			case StateMachineState::RequestLanguage:
 			{
-				if ((serverVersion < static_cast<std::uint8_t>(Version::SecondPublishedEdition)) &&
-				    (nullptr == primaryVirtualTerminal))
-				{
-					languageCommandInterface.set_partner(nullptr); // TC might not reply and no VT specified, so just see if anyone knows.
-					CANStackLogger::warn("[TC]: The TC is < version 4 but no VT was provided. Language data will be requested globally, which might not be ideal.");
-				}
-
-				if ((serverVersion < static_cast<std::uint8_t>(Version::SecondPublishedEdition)) &&
-				    (nullptr != primaryVirtualTerminal) &&
-				    (primaryVirtualTerminal->languageCommandInterface.send_request_language_command()))
+				if (languageCommandInterface.send_request_language_command())
 				{
 					set_state(StateMachineState::WaitForLanguageResponse);
-				}
-				else if (languageCommandInterface.send_request_language_command())
-				{
-					set_state(StateMachineState::WaitForLanguageResponse);
+					languageCommandWaitingTimestamp_ms = SystemTiming::get_timestamp_ms();
 				}
 				else if (SystemTiming::time_expired_ms(stateMachineTimestamp_ms, SIX_SECOND_TIMEOUT_MS))
 				{
-					CANStackLogger::error("[TC]: Timeout trying to send request for language command message. Resetting client connection.");
+					LOG_ERROR("[TC]: Timeout trying to send request for language command message. Resetting client connection.");
 					set_state(StateMachineState::Disconnected);
 				}
 			}
@@ -545,10 +520,35 @@ namespace isobus
 
 			case StateMachineState::WaitForLanguageResponse:
 			{
-				if ((SystemTiming::get_time_elapsed_ms(languageCommandInterface.get_language_command_timestamp()) < SIX_SECOND_TIMEOUT_MS) &&
+				if ((SystemTiming::get_time_elapsed_ms(languageCommandInterface.get_language_command_timestamp()) < TWO_SECOND_TIMEOUT_MS) &&
 				    ("" != languageCommandInterface.get_language_code()))
 				{
 					set_state(StateMachineState::ProcessDDOP);
+				}
+				else if (SystemTiming::time_expired_ms(languageCommandWaitingTimestamp_ms, SIX_SECOND_TIMEOUT_MS))
+				{
+					LOG_WARNING("[TC]: Timeout waiting for language response. Moving on to processing the DDOP anyways.");
+					set_state(StateMachineState::ProcessDDOP);
+				}
+				else if ((SystemTiming::time_expired_ms(stateMachineTimestamp_ms, TWO_SECOND_TIMEOUT_MS)) &&
+				         (nullptr != languageCommandInterface.get_partner()))
+				{
+					LOG_WARNING("[TC]: No response to our request for the language command data, which is unusual.");
+
+					if (nullptr != primaryVirtualTerminal)
+					{
+						LOG_WARNING("[TC]: Falling back to VT for language data.");
+						languageCommandInterface.set_partner(primaryVirtualTerminal);
+						languageCommandInterface.send_request_language_command();
+						stateMachineTimestamp_ms = SystemTiming::get_timestamp_ms();
+					}
+					else
+					{
+						LOG_WARNING("[TC]: Since no VT was specified, falling back to a global request for language data.");
+						languageCommandInterface.set_partner(nullptr);
+						languageCommandInterface.send_request_language_command();
+						stateMachineTimestamp_ms = SystemTiming::get_timestamp_ms();
+					}
 				}
 			}
 			break;
@@ -562,8 +562,8 @@ namespace isobus
 					if (serverVersion < clientDDOP->get_task_controller_compatibility_level())
 					{
 						clientDDOP->set_task_controller_compatibility_level(serverVersion); // Manipulate the DDOP slightly if needed to upload a version compatible DDOP
-						CANStackLogger::info("[TC]: DDOP will be generated using the server's version instead of the specified version. New version: " +
-						                     isobus::to_string(static_cast<int>(serverVersion)));
+						LOG_INFO("[TC]: DDOP will be generated using the server's version instead of the specified version. New version: " +
+						         isobus::to_string(static_cast<int>(serverVersion)));
 					}
 
 					if (generatedBinaryDDOP.empty())
@@ -572,11 +572,11 @@ namespace isobus
 						if (clientDDOP->generate_binary_object_pool(generatedBinaryDDOP))
 						{
 							process_labels_from_ddop();
-							CANStackLogger::debug("[TC]: DDOP Generated, size: " + isobus::to_string(static_cast<int>(generatedBinaryDDOP.size())));
+							LOG_DEBUG("[TC]: DDOP Generated, size: " + isobus::to_string(static_cast<int>(generatedBinaryDDOP.size())));
 
 							if ((!previousStructureLabel.empty()) && (ddopStructureLabel == previousStructureLabel))
 							{
-								CANStackLogger::error("[TC]: You didn't properly update your new DDOP's structure label. ISO11783-10 states that an update to an object pool must include an updated structure label.");
+								LOG_ERROR("[TC]: You didn't properly update your new DDOP's structure label. ISO11783-10 states that an update to an object pool must include an updated structure label.");
 							}
 							previousStructureLabel = ddopStructureLabel;
 
@@ -584,13 +584,13 @@ namespace isobus
 						}
 						else
 						{
-							CANStackLogger::error("[TC]: Cannot proceed with connection to TC due to invalid DDOP. Check log for [DDOP] events. TC client will now terminate.");
+							LOG_ERROR("[TC]: Cannot proceed with connection to TC due to invalid DDOP. Check log for [DDOP] events. TC client will now terminate.");
 							terminate();
 						}
 					}
 					else
 					{
-						CANStackLogger::debug("[TC]: Using previously generated DDOP binary");
+						LOG_DEBUG("[TC]: Using previously generated DDOP binary");
 						set_state(StateMachineState::RequestStructureLabel);
 					}
 				}
@@ -599,19 +599,19 @@ namespace isobus
 					if ((ddopLocalizationLabel.empty()) ||
 					    (ddopStructureLabel.empty()))
 					{
-						CANStackLogger::debug("[TC]: Beginning a search of pre-serialized DDOP for device structure and localization labels.");
+						LOG_DEBUG("[TC]: Beginning a search of pre-serialized DDOP for device structure and localization labels.");
 						process_labels_from_ddop();
 
 						if ((ddopLocalizationLabel.empty()) ||
 						    (ddopStructureLabel.empty()))
 						{
-							CANStackLogger::error("[TC]: Failed to parse the DDOP. Ensure you provided a valid device object. TC client will now terminate.");
+							LOG_ERROR("[TC]: Failed to parse the DDOP. Ensure you provided a valid device object. TC client will now terminate.");
 							terminate();
 						}
 					}
 					else
 					{
-						CANStackLogger::debug("[TC]: Reusing previously located device labels.");
+						LOG_DEBUG("[TC]: Reusing previously located device labels.");
 					}
 					set_state(StateMachineState::RequestStructureLabel);
 				}
@@ -626,7 +626,7 @@ namespace isobus
 				}
 				else if (SystemTiming::time_expired_ms(stateMachineTimestamp_ms, TWO_SECOND_TIMEOUT_MS))
 				{
-					CANStackLogger::error("[TC]: Timeout trying to send request for TC structure label. Resetting client connection.");
+					LOG_ERROR("[TC]: Timeout trying to send request for TC structure label. Resetting client connection.");
 					set_state(StateMachineState::Disconnected);
 				}
 			}
@@ -636,7 +636,7 @@ namespace isobus
 			{
 				if (SystemTiming::time_expired_ms(stateMachineTimestamp_ms, TWO_SECOND_TIMEOUT_MS))
 				{
-					CANStackLogger::error("[TC]: Timeout waiting for TC structure label. Resetting client connection.");
+					LOG_ERROR("[TC]: Timeout waiting for TC structure label. Resetting client connection.");
 					set_state(StateMachineState::Disconnected);
 				}
 			}
@@ -650,7 +650,7 @@ namespace isobus
 				}
 				else if (SystemTiming::time_expired_ms(stateMachineTimestamp_ms, TWO_SECOND_TIMEOUT_MS))
 				{
-					CANStackLogger::error("[TC]: Timeout trying to send request for TC localization label. Resetting client connection.");
+					LOG_ERROR("[TC]: Timeout trying to send request for TC localization label. Resetting client connection.");
 					set_state(StateMachineState::Disconnected);
 				}
 			}
@@ -660,7 +660,7 @@ namespace isobus
 			{
 				if (SystemTiming::time_expired_ms(stateMachineTimestamp_ms, TWO_SECOND_TIMEOUT_MS))
 				{
-					CANStackLogger::error("[TC]: Timeout waiting for TC localization label. Resetting client connection.");
+					LOG_ERROR("[TC]: Timeout waiting for TC localization label. Resetting client connection.");
 					set_state(StateMachineState::Disconnected);
 				}
 			}
@@ -674,7 +674,7 @@ namespace isobus
 				}
 				else if (SystemTiming::time_expired_ms(stateMachineTimestamp_ms, TWO_SECOND_TIMEOUT_MS))
 				{
-					CANStackLogger::error("[TC]: Timeout trying to send delete object pool message. Resetting client connection.");
+					LOG_ERROR("[TC]: Timeout trying to send delete object pool message. Resetting client connection.");
 					set_state(StateMachineState::Disconnected);
 				}
 			}
@@ -684,7 +684,7 @@ namespace isobus
 			{
 				if (SystemTiming::time_expired_ms(stateMachineTimestamp_ms, TWO_SECOND_TIMEOUT_MS))
 				{
-					CANStackLogger::error("[TC]: Timeout waiting for delete object pool response. Resetting client connection.");
+					LOG_ERROR("[TC]: Timeout waiting for delete object pool response. Resetting client connection.");
 					set_state(StateMachineState::Disconnected);
 				}
 			}
@@ -698,7 +698,7 @@ namespace isobus
 				}
 				else if (SystemTiming::time_expired_ms(stateMachineTimestamp_ms, TWO_SECOND_TIMEOUT_MS))
 				{
-					CANStackLogger::error("[TC]: Timeout trying to send request to transfer object pool. Resetting client connection.");
+					LOG_ERROR("[TC]: Timeout trying to send request to transfer object pool. Resetting client connection.");
 					set_state(StateMachineState::Disconnected);
 				}
 			}
@@ -708,7 +708,7 @@ namespace isobus
 			{
 				if (SystemTiming::time_expired_ms(stateMachineTimestamp_ms, TWO_SECOND_TIMEOUT_MS))
 				{
-					CANStackLogger::error("[TC]: Timeout waiting for request transfer object pool response. Resetting client connection.");
+					LOG_ERROR("[TC]: Timeout waiting for request transfer object pool response. Resetting client connection.");
 					set_state(StateMachineState::Disconnected);
 				}
 			}
@@ -759,7 +759,7 @@ namespace isobus
 				}
 				else if (SystemTiming::time_expired_ms(stateMachineTimestamp_ms, TWO_SECOND_TIMEOUT_MS))
 				{
-					CANStackLogger::error("[TC]: Timeout trying to begin the object pool upload. Resetting client connection.");
+					LOG_ERROR("[TC]: Timeout trying to begin the object pool upload. Resetting client connection.");
 					set_state(StateMachineState::Disconnected);
 				}
 			}
@@ -776,7 +776,7 @@ namespace isobus
 			{
 				if (SystemTiming::time_expired_ms(stateMachineTimestamp_ms, TWO_SECOND_TIMEOUT_MS))
 				{
-					CANStackLogger::error("[TC]: Timeout waiting for object pool transfer response. Resetting client connection.");
+					LOG_ERROR("[TC]: Timeout waiting for object pool transfer response. Resetting client connection.");
 					set_state(StateMachineState::Disconnected);
 				}
 			}
@@ -790,7 +790,7 @@ namespace isobus
 				}
 				else if (SystemTiming::time_expired_ms(stateMachineTimestamp_ms, TWO_SECOND_TIMEOUT_MS))
 				{
-					CANStackLogger::error("[TC]: Timeout trying to activate object pool. Resetting client connection.");
+					LOG_ERROR("[TC]: Timeout trying to activate object pool. Resetting client connection.");
 					set_state(StateMachineState::Disconnected);
 				}
 			}
@@ -800,7 +800,7 @@ namespace isobus
 			{
 				if (SystemTiming::time_expired_ms(stateMachineTimestamp_ms, TWO_SECOND_TIMEOUT_MS))
 				{
-					CANStackLogger::error("[TC]: Timeout waiting for activate object pool response. Resetting client connection.");
+					LOG_ERROR("[TC]: Timeout waiting for activate object pool response. Resetting client connection.");
 					set_state(StateMachineState::Disconnected);
 				}
 			}
@@ -810,7 +810,7 @@ namespace isobus
 			{
 				if (SystemTiming::time_expired_ms(serverStatusMessageTimestamp_ms, SIX_SECOND_TIMEOUT_MS))
 				{
-					CANStackLogger::error("[TC]: Server Status Message Timeout. The TC may be offline.");
+					LOG_ERROR("[TC]: Server Status Message Timeout. The TC may be offline.");
 					set_state(StateMachineState::Disconnected);
 				}
 				else
@@ -829,7 +829,7 @@ namespace isobus
 				}
 				else if (SystemTiming::time_expired_ms(stateMachineTimestamp_ms, TWO_SECOND_TIMEOUT_MS))
 				{
-					CANStackLogger::error("[TC]: Timeout sending object pool deactivate. Client terminated.");
+					LOG_ERROR("[TC]: Timeout sending object pool deactivate. Client terminated.");
 					set_state(StateMachineState::Disconnected);
 					terminate();
 				}
@@ -842,13 +842,13 @@ namespace isobus
 				{
 					if (shouldReuploadAfterDDOPDeletion)
 					{
-						CANStackLogger::warn("[TC]: Timeout waiting for deactivate object pool response. This is unusual, but we're just going to reconnect anyways.");
+						LOG_WARNING("[TC]: Timeout waiting for deactivate object pool response. This is unusual, but we're just going to reconnect anyways.");
 						shouldReuploadAfterDDOPDeletion = false;
 						set_state(StateMachineState::ProcessDDOP);
 					}
 					else
 					{
-						CANStackLogger::error("[TC]: Timeout waiting for deactivate object pool response. Client terminated.");
+						LOG_ERROR("[TC]: Timeout waiting for deactivate object pool response. Client terminated.");
 						set_state(StateMachineState::Disconnected);
 						terminate();
 					}
@@ -1031,9 +1031,7 @@ namespace isobus
 
 	void TaskControllerClient::process_queued_commands()
 	{
-#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
-		const std::lock_guard<std::mutex> lock(clientMutex);
-#endif
+		LOCK_GUARD(Mutex, clientMutex);
 		bool transmitSuccessful = true;
 
 		while (!queuedValueRequests.empty() && transmitSuccessful)
@@ -1042,7 +1040,7 @@ namespace isobus
 
 			for (auto &currentCallback : requestValueCallbacks)
 			{
-				std::uint32_t newValue = 0;
+				std::int32_t newValue = 0;
 				if (currentCallback.callback(currentRequest.elementNumber, currentRequest.ddi, newValue, currentCallback.parent))
 				{
 					transmitSuccessful = send_value_command(currentRequest.elementNumber, currentRequest.ddi, newValue);
@@ -1078,13 +1076,13 @@ namespace isobus
 
 		for (auto &measurementTimeCommand : measurementTimeIntervalCommands)
 		{
-			if (SystemTiming::time_expired_ms(measurementTimeCommand.lastValue, measurementTimeCommand.processDataValue))
+			if (SystemTiming::time_expired_ms(static_cast<std::uint32_t>(measurementTimeCommand.lastValue), static_cast<std::uint32_t>(measurementTimeCommand.processDataValue)))
 			{
 				// Time to update this time interval variable
 				transmitSuccessful = false;
 				for (auto &currentCallback : requestValueCallbacks)
 				{
-					std::uint32_t newValue = 0;
+					std::int32_t newValue = 0;
 					if (currentCallback.callback(measurementTimeCommand.elementNumber, measurementTimeCommand.ddi, newValue, currentCallback.parent))
 					{
 						transmitSuccessful = send_value_command(measurementTimeCommand.elementNumber, measurementTimeCommand.ddi, newValue);
@@ -1094,14 +1092,14 @@ namespace isobus
 
 				if (transmitSuccessful)
 				{
-					measurementTimeCommand.lastValue = SystemTiming::get_timestamp_ms();
+					measurementTimeCommand.lastValue = static_cast<std::int32_t>(SystemTiming::get_timestamp_ms());
 				}
 			}
 		}
 		for (auto &measurementMaxCommand : measurementMaximumThresholdCommands)
 		{
 			// Get the current process data value
-			std::uint32_t newValue = 0;
+			std::int32_t newValue = 0;
 			for (auto &currentCallback : requestValueCallbacks)
 			{
 				if (currentCallback.callback(measurementMaxCommand.elementNumber, measurementMaxCommand.ddi, newValue, currentCallback.parent))
@@ -1129,7 +1127,7 @@ namespace isobus
 		for (auto &measurementMinCommand : measurementMinimumThresholdCommands)
 		{
 			// Get the current process data value
-			std::uint32_t newValue = 0;
+			std::int32_t newValue = 0;
 			for (auto &currentCallback : requestValueCallbacks)
 			{
 				if (currentCallback.callback(measurementMinCommand.elementNumber, measurementMinCommand.ddi, newValue, currentCallback.parent))
@@ -1157,7 +1155,7 @@ namespace isobus
 		for (auto &measurementChangeCommand : measurementOnChangeThresholdCommands)
 		{
 			// Get the current process data value
-			std::uint32_t newValue = 0;
+			std::int32_t newValue = 0;
 			for (auto &currentCallback : requestValueCallbacks)
 			{
 				if (currentCallback.callback(measurementChangeCommand.elementNumber, measurementChangeCommand.ddi, newValue, currentCallback.parent))
@@ -1191,6 +1189,7 @@ namespace isobus
 		    (nullptr != message.get_source_control_function()))
 		{
 			auto parentTC = static_cast<TaskControllerClient *>(parentPointer);
+			auto &clientMutex = parentTC->clientMutex;
 			const auto &messageData = message.get_data();
 
 			switch (message.get_identifier().get_parameter_group_number())
@@ -1202,7 +1201,7 @@ namespace isobus
 						std::uint32_t targetParameterGroupNumber = message.get_uint24_at(5);
 						if (static_cast<std::uint32_t>(CANLibParameterGroupNumber::ProcessData) == targetParameterGroupNumber)
 						{
-							CANStackLogger::error("[TC]: The TC Server is NACK-ing our messages. Disconnecting.");
+							LOG_ERROR("[TC]: The TC Server is NACK-ing our messages. Disconnecting.");
 							parentTC->set_state(StateMachineState::Disconnected);
 						}
 					}
@@ -1225,7 +1224,7 @@ namespace isobus
 									}
 									else
 									{
-										CANStackLogger::warn("[TC]: Server requested version information at a strange time.");
+										LOG_WARNING("[TC]: Server requested version information at a strange time.");
 									}
 								}
 								break;
@@ -1242,13 +1241,13 @@ namespace isobus
 
 									if (messageData[1] > static_cast<std::uint8_t>(Version::SecondPublishedEdition))
 									{
-										CANStackLogger::warn("[TC]: Server version is newer than client's maximum supported version.");
+										LOG_WARNING("[TC]: Server version is newer than client's maximum supported version.");
 									}
-									CANStackLogger::debug("[TC]: TC Server supports version %u with %u booms, %u sections, and %u position based control channels.",
-									                      messageData[1],
-									                      messageData[5],
-									                      messageData[6],
-									                      messageData[7]);
+									LOG_DEBUG("[TC]: TC Server supports version %u with %u booms, %u sections, and %u position based control channels.",
+									          messageData[1],
+									          messageData[5],
+									          messageData[6],
+									          messageData[7]);
 
 									if (StateMachineState::WaitForRequestVersionResponse == parentTC->get_state())
 									{
@@ -1259,7 +1258,7 @@ namespace isobus
 
 								default:
 								{
-									CANStackLogger::warn("[TC]: Unsupported process data technical data message received. Message will be dropped.");
+									LOG_WARNING("[TC]: Unsupported process data technical data message received. Message will be dropped.");
 								}
 								break;
 							}
@@ -1297,26 +1296,26 @@ namespace isobus
 
 											if (tcStructure.size() > 40)
 											{
-												CANStackLogger::warn("[TC]: Structure Label from TC exceeds the max length allowed by ISO11783-10");
+												LOG_WARNING("[TC]: Structure Label from TC exceeds the max length allowed by ISO11783-10");
 											}
 
 											if (parentTC->ddopStructureLabel == tcStructure)
 											{
 												// Structure label matched. No upload needed yet.
-												CANStackLogger::debug("[TC]: Task controller structure labels match");
+												LOG_DEBUG("[TC]: Task controller structure labels match");
 												parentTC->set_state(StateMachineState::RequestLocalizationLabel);
 											}
 											else
 											{
 												// Structure label did not match. Need to delete current DDOP and re-upload.
-												CANStackLogger::info("[TC]: Task controller structure labels do not match. DDOP will be deleted and reuploaded.");
+												LOG_INFO("[TC]: Task controller structure labels do not match. DDOP will be deleted and reuploaded.");
 												parentTC->set_state(StateMachineState::SendDeleteObjectPool);
 											}
 										}
 									}
 									else
 									{
-										CANStackLogger::warn("[TC]: Structure label message received, but ignored due to current state machine state.");
+										LOG_WARNING("[TC]: Structure label message received, but ignored due to current state machine state.");
 									}
 								}
 								break;
@@ -1357,20 +1356,20 @@ namespace isobus
 											if (labelsMatch)
 											{
 												// DDOP labels all matched
-												CANStackLogger::debug("[TC]: Task controller localization labels match");
+												LOG_DEBUG("[TC]: Task controller localization labels match");
 												parentTC->set_state(StateMachineState::SendObjectPoolActivate);
 											}
 											else
 											{
 												// Labels didn't match. Reupload
-												CANStackLogger::info("[TC]: Task controller localization labels do not match. DDOP will be deleted and reuploaded.");
+												LOG_INFO("[TC]: Task controller localization labels do not match. DDOP will be deleted and reuploaded.");
 												parentTC->set_state(StateMachineState::SendDeleteObjectPool);
 											}
 										}
 									}
 									else
 									{
-										CANStackLogger::warn("[TC]: Localization label message received, but ignored due to current state machine state.");
+										LOG_WARNING("[TC]: Localization label message received, but ignored due to current state machine state.");
 									}
 								}
 								break;
@@ -1382,18 +1381,18 @@ namespace isobus
 										if (0 == messageData[1])
 										{
 											// Because there is overhead associated with object storage, it is impossible to predict whether there is enough memory available, technically.
-											CANStackLogger::debug("[TC]: Server indicates there may be enough memory available.");
+											LOG_DEBUG("[TC]: Server indicates there may be enough memory available.");
 											parentTC->set_state(StateMachineState::BeginTransferDDOP);
 										}
 										else
 										{
-											CANStackLogger::error("[TC]: Server states that there is not enough memory available for our DDOP. Client will terminate.");
+											LOG_ERROR("[TC]: Server states that there is not enough memory available for our DDOP. Client will terminate.");
 											parentTC->terminate();
 										}
 									}
 									else
 									{
-										CANStackLogger::warn("[TC]: Request Object-pool Transfer Response message received, but ignored due to current state machine state.");
+										LOG_WARNING("[TC]: Request Object-pool Transfer Response message received, but ignored due to current state machine state.");
 									}
 								}
 								break;
@@ -1404,59 +1403,59 @@ namespace isobus
 									{
 										if (0 == messageData[1])
 										{
-											CANStackLogger::info("[TC]: DDOP Activated without error.");
+											LOG_INFO("[TC]: DDOP Activated without error.");
 											parentTC->set_state(StateMachineState::Connected);
 										}
 										else
 										{
-											CANStackLogger::error("[TC]: DDOP was not activated.");
+											LOG_ERROR("[TC]: DDOP was not activated.");
 											if (0x01 & messageData[1])
 											{
-												CANStackLogger::error("[TC]: There are errors in the DDOP. Faulting parent ID: " +
-												                      isobus::to_string(static_cast<int>(static_cast<std::uint16_t>(messageData[2]) |
-												                                                         static_cast<std::uint16_t>(messageData[3] << 8))) +
-												                      " Faulting object: " +
-												                      isobus::to_string(static_cast<int>(static_cast<std::uint16_t>(messageData[4]) |
-												                                                         static_cast<std::uint16_t>(messageData[5] << 8))));
+												LOG_ERROR("[TC]: There are errors in the DDOP. Faulting parent ID: " +
+												          isobus::to_string(static_cast<int>(static_cast<std::uint16_t>(messageData[2]) |
+												                                             static_cast<std::uint16_t>(messageData[3] << 8))) +
+												          " Faulting object: " +
+												          isobus::to_string(static_cast<int>(static_cast<std::uint16_t>(messageData[4]) |
+												                                             static_cast<std::uint16_t>(messageData[5] << 8))));
 												if (0x01 & messageData[6])
 												{
-													CANStackLogger::error("[TC]: Method or attribute not supported by the TC");
+													LOG_ERROR("[TC]: Method or attribute not supported by the TC");
 												}
 												if (0x02 & messageData[6])
 												{
-													CANStackLogger::error("[TC]: Unknown object reference (missing object)");
+													LOG_ERROR("[TC]: Unknown object reference (missing object)");
 												}
 												if (0x04 & messageData[6])
 												{
-													CANStackLogger::error("[TC]: Unknown error (Any other error)");
+													LOG_ERROR("[TC]: Unknown error (Any other error)");
 												}
 												if (0x08 & messageData[6])
 												{
-													CANStackLogger::error("[TC]: Device descriptor object pool was deleted from volatile memory");
+													LOG_ERROR("[TC]: Device descriptor object pool was deleted from volatile memory");
 												}
 												if (0xF0 & messageData[6])
 												{
-													CANStackLogger::warn("[TC]: The TC sent illegal errors in the reserved bits of the response.");
+													LOG_WARNING("[TC]: The TC sent illegal errors in the reserved bits of the response.");
 												}
 											}
 											if (0x02 & messageData[1])
 											{
-												CANStackLogger::error("[TC]: Task Controller ran out of memory during activation.");
+												LOG_ERROR("[TC]: Task Controller ran out of memory during activation.");
 											}
 											if (0x04 & messageData[1])
 											{
-												CANStackLogger::error("[TC]: Task Controller indicates an unknown error occurred.");
+												LOG_ERROR("[TC]: Task Controller indicates an unknown error occurred.");
 											}
 											if (0x08 & messageData[1])
 											{
-												CANStackLogger::error("[TC]: A different DDOP with the same structure label already exists in the TC.");
+												LOG_ERROR("[TC]: A different DDOP with the same structure label already exists in the TC.");
 											}
 											if (0xF0 & messageData[1])
 											{
-												CANStackLogger::warn("[TC]: The TC sent illegal errors in the reserved bits of the response.");
+												LOG_WARNING("[TC]: The TC sent illegal errors in the reserved bits of the response.");
 											}
 											parentTC->set_state(StateMachineState::Disconnected);
-											CANStackLogger::error("[TC]: Client terminated.");
+											LOG_ERROR("[TC]: Client terminated.");
 											parentTC->terminate();
 										}
 									}
@@ -1464,7 +1463,7 @@ namespace isobus
 									{
 										if (0 == messageData[1])
 										{
-											CANStackLogger::info("[TC]: Object pool deactivated OK.");
+											LOG_INFO("[TC]: Object pool deactivated OK.");
 
 											if (parentTC->shouldReuploadAfterDDOPDeletion)
 											{
@@ -1473,12 +1472,12 @@ namespace isobus
 										}
 										else
 										{
-											CANStackLogger::error("[TC]: Object pool deactivation error.");
+											LOG_ERROR("[TC]: Object pool deactivation error.");
 										}
 									}
 									else
 									{
-										CANStackLogger::warn("[TC]: Object pool activate/deactivate response received at a strange time. Message dropped.");
+										LOG_WARNING("[TC]: Object pool activate/deactivate response received at a strange time. Message dropped.");
 									}
 								}
 								break;
@@ -1500,33 +1499,33 @@ namespace isobus
 									{
 										if (0 == messageData[1])
 										{
-											CANStackLogger::debug("[TC]: DDOP upload completed with no errors.");
+											LOG_DEBUG("[TC]: DDOP upload completed with no errors.");
 											parentTC->set_state(StateMachineState::SendObjectPoolActivate);
 										}
 										else
 										{
 											if (0x01 == messageData[1])
 											{
-												CANStackLogger::error("[TC]: DDOP upload completed but TC ran out of memory during transfer.");
+												LOG_ERROR("[TC]: DDOP upload completed but TC ran out of memory during transfer.");
 											}
 											else
 											{
-												CANStackLogger::error("[TC]: DDOP upload completed but TC had some unknown error.");
+												LOG_ERROR("[TC]: DDOP upload completed but TC had some unknown error.");
 											}
-											CANStackLogger::error("[TC]: Client terminated.");
+											LOG_ERROR("[TC]: Client terminated.");
 											parentTC->terminate();
 										}
 									}
 									else
 									{
-										CANStackLogger::warn("[TC]: Recieved unexpected object pool transfer response");
+										LOG_WARNING("[TC]: Recieved unexpected object pool transfer response");
 									}
 								}
 								break;
 
 								default:
 								{
-									CANStackLogger::warn("[TC]: Unsupported device descriptor command message received. Message will be dropped.");
+									LOG_WARNING("[TC]: Unsupported device descriptor command message received. Message will be dropped.");
 								}
 								break;
 							}
@@ -1554,25 +1553,23 @@ namespace isobus
 
 						case ProcessDataCommands::ClientTask:
 						{
-							CANStackLogger::warn("[TC]: Server sent the client task message, which is not meant to be sent by servers.");
+							LOG_WARNING("[TC]: Server sent the client task message, which is not meant to be sent by servers.");
 						}
 						break;
 
 						case ProcessDataCommands::RequestValue:
 						{
 							ProcessDataCallbackInfo requestData = { 0, 0, 0, 0, false, false };
-#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
-							const std::lock_guard<std::mutex> lock(parentTC->clientMutex);
-#endif
+							LOCK_GUARD(Mutex, clientMutex);
 
 							requestData.ackRequested = false;
 							requestData.elementNumber = (static_cast<std::uint16_t>(messageData[0] >> 4) | (static_cast<std::uint16_t>(messageData[1]) << 4));
 							requestData.ddi = static_cast<std::uint16_t>(messageData[2]) |
 							  (static_cast<std::uint16_t>(messageData[3]) << 8);
-							requestData.processDataValue = (static_cast<std::uint32_t>(messageData[4]) |
-							                                (static_cast<std::uint16_t>(messageData[5]) << 8) |
-							                                (static_cast<std::uint16_t>(messageData[6]) << 16) |
-							                                (static_cast<std::uint16_t>(messageData[7]) << 24));
+							requestData.processDataValue = (static_cast<std::int32_t>(messageData[4]) |
+							                                (static_cast<std::int32_t>(messageData[5]) << 8) |
+							                                (static_cast<std::int32_t>(messageData[6]) << 16) |
+							                                (static_cast<std::int32_t>(messageData[7]) << 24));
 							parentTC->queuedValueRequests.push_back(requestData);
 						}
 						break;
@@ -1580,18 +1577,16 @@ namespace isobus
 						case ProcessDataCommands::Value:
 						{
 							ProcessDataCallbackInfo requestData = { 0, 0, 0, 0, false, false };
-#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
-							const std::lock_guard<std::mutex> lock(parentTC->clientMutex);
-#endif
+							LOCK_GUARD(Mutex, clientMutex);
 
 							requestData.ackRequested = false;
 							requestData.elementNumber = (static_cast<std::uint16_t>(messageData[0] >> 4) | (static_cast<std::uint16_t>(messageData[1]) << 4));
 							requestData.ddi = static_cast<std::uint16_t>(messageData[2]) |
 							  (static_cast<std::uint16_t>(messageData[3]) << 8);
-							requestData.processDataValue = (static_cast<std::uint32_t>(messageData[4]) |
-							                                (static_cast<std::uint16_t>(messageData[5]) << 8) |
-							                                (static_cast<std::uint16_t>(messageData[6]) << 16) |
-							                                (static_cast<std::uint16_t>(messageData[7]) << 24));
+							requestData.processDataValue = (static_cast<std::int32_t>(messageData[4]) |
+							                                (static_cast<std::int32_t>(messageData[5]) << 8) |
+							                                (static_cast<std::int32_t>(messageData[6]) << 16) |
+							                                (static_cast<std::int32_t>(messageData[7]) << 24));
 							parentTC->queuedValueCommands.push_back(requestData);
 						}
 						break;
@@ -1599,18 +1594,16 @@ namespace isobus
 						case ProcessDataCommands::SetValueAndAcknowledge:
 						{
 							ProcessDataCallbackInfo requestData = { 0, 0, 0, 0, false, false };
-#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
-							const std::lock_guard<std::mutex> lock(parentTC->clientMutex);
-#endif
+							LOCK_GUARD(Mutex, clientMutex);
 
 							requestData.ackRequested = true;
 							requestData.elementNumber = (static_cast<std::uint16_t>(messageData[0] >> 4) | (static_cast<std::uint16_t>(messageData[1]) << 4));
 							requestData.ddi = static_cast<std::uint16_t>(messageData[2]) |
 							  (static_cast<std::uint16_t>(messageData[3]) << 8);
-							requestData.processDataValue = (static_cast<std::uint32_t>(messageData[4]) |
-							                                (static_cast<std::uint16_t>(messageData[5]) << 8) |
-							                                (static_cast<std::uint16_t>(messageData[6]) << 16) |
-							                                (static_cast<std::uint16_t>(messageData[7]) << 24));
+							requestData.processDataValue = (static_cast<std::int32_t>(messageData[4]) |
+							                                (static_cast<std::int32_t>(messageData[5]) << 8) |
+							                                (static_cast<std::int32_t>(messageData[6]) << 16) |
+							                                (static_cast<std::int32_t>(messageData[7]) << 24));
 							parentTC->queuedValueCommands.push_back(requestData);
 						}
 						break;
@@ -1618,42 +1611,40 @@ namespace isobus
 						case ProcessDataCommands::MeasurementTimeInterval:
 						{
 							ProcessDataCallbackInfo commandData = { 0, 0, 0, 0, false, false };
-#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
-							const std::lock_guard<std::mutex> lock(parentTC->clientMutex);
-#endif
+							LOCK_GUARD(Mutex, clientMutex);
 
 							commandData.elementNumber = (static_cast<std::uint16_t>(messageData[0] >> 4) | (static_cast<std::uint16_t>(messageData[1]) << 4));
 							commandData.ddi = static_cast<std::uint16_t>(messageData[2]) |
 							  (static_cast<std::uint16_t>(messageData[3]) << 8);
-							commandData.processDataValue = (static_cast<std::uint32_t>(messageData[4]) |
-							                                (static_cast<std::uint16_t>(messageData[5]) << 8) |
-							                                (static_cast<std::uint16_t>(messageData[6]) << 16) |
-							                                (static_cast<std::uint16_t>(messageData[7]) << 24));
-							commandData.lastValue = SystemTiming::get_timestamp_ms();
+							commandData.processDataValue = (static_cast<std::int32_t>(messageData[4]) |
+							                                (static_cast<std::int32_t>(messageData[5]) << 8) |
+							                                (static_cast<std::int32_t>(messageData[6]) << 16) |
+							                                (static_cast<std::int32_t>(messageData[7]) << 24));
+							commandData.lastValue = static_cast<std::int32_t>(SystemTiming::get_timestamp_ms());
 
 							auto previousCommand = std::find(parentTC->measurementTimeIntervalCommands.begin(), parentTC->measurementTimeIntervalCommands.end(), commandData);
 							if (parentTC->measurementTimeIntervalCommands.end() == previousCommand)
 							{
 								parentTC->measurementTimeIntervalCommands.push_back(commandData);
-								CANStackLogger::debug("[TC]: TC Requests element: " +
-								                      isobus::to_string(static_cast<int>(commandData.elementNumber)) +
-								                      " DDI: " +
-								                      isobus::to_string(static_cast<int>(commandData.ddi)) +
-								                      " every: " +
-								                      isobus::to_string(static_cast<int>(commandData.processDataValue)) +
-								                      " milliseconds.");
+								LOG_DEBUG("[TC]: TC Requests element: " +
+								          isobus::to_string(static_cast<int>(commandData.elementNumber)) +
+								          " DDI: " +
+								          isobus::to_string(static_cast<int>(commandData.ddi)) +
+								          " every: " +
+								          isobus::to_string(static_cast<int>(commandData.processDataValue)) +
+								          " milliseconds.");
 							}
 							else
 							{
 								// Use the existing one and update the value
 								previousCommand->processDataValue = commandData.processDataValue;
-								CANStackLogger::debug("[TC]: TC Altered time interval request for element: " +
-								                      isobus::to_string(static_cast<int>(commandData.elementNumber)) +
-								                      " DDI: " +
-								                      isobus::to_string(static_cast<int>(commandData.ddi)) +
-								                      " every: " +
-								                      isobus::to_string(static_cast<int>(commandData.processDataValue)) +
-								                      " milliseconds.");
+								LOG_DEBUG("[TC]: TC Altered time interval request for element: " +
+								          isobus::to_string(static_cast<int>(commandData.elementNumber)) +
+								          " DDI: " +
+								          isobus::to_string(static_cast<int>(commandData.ddi)) +
+								          " every: " +
+								          isobus::to_string(static_cast<int>(commandData.processDataValue)) +
+								          " milliseconds.");
 							}
 						}
 						break;
@@ -1661,28 +1652,26 @@ namespace isobus
 						case ProcessDataCommands::MeasurementMaximumWithinThreshold:
 						{
 							ProcessDataCallbackInfo commandData = { 0, 0, 0, 0, false, false };
-#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
-							const std::lock_guard<std::mutex> lock(parentTC->clientMutex);
-#endif
+							LOCK_GUARD(Mutex, clientMutex);
 
 							commandData.elementNumber = (static_cast<std::uint16_t>(messageData[0] >> 4) | (static_cast<std::uint16_t>(messageData[1]) << 4));
 							commandData.ddi = static_cast<std::uint16_t>(messageData[2]) |
 							  (static_cast<std::uint16_t>(messageData[3]) << 8);
-							commandData.processDataValue = (static_cast<std::uint32_t>(messageData[4]) |
-							                                (static_cast<std::uint16_t>(messageData[5]) << 8) |
-							                                (static_cast<std::uint16_t>(messageData[6]) << 16) |
-							                                (static_cast<std::uint16_t>(messageData[7]) << 24));
+							commandData.processDataValue = (static_cast<std::int32_t>(messageData[4]) |
+							                                (static_cast<std::int32_t>(messageData[5]) << 8) |
+							                                (static_cast<std::int32_t>(messageData[6]) << 16) |
+							                                (static_cast<std::int32_t>(messageData[7]) << 24));
 
 							auto previousCommand = std::find(parentTC->measurementMaximumThresholdCommands.begin(), parentTC->measurementMaximumThresholdCommands.end(), commandData);
 							if (parentTC->measurementMaximumThresholdCommands.end() == previousCommand)
 							{
 								parentTC->measurementMaximumThresholdCommands.push_back(commandData);
-								CANStackLogger::debug("[TC]: TC Requests element: " +
-								                      isobus::to_string(static_cast<int>(commandData.elementNumber)) +
-								                      " DDI: " +
-								                      isobus::to_string(static_cast<int>(commandData.ddi)) +
-								                      " when it is above the raw value: " +
-								                      isobus::to_string(static_cast<int>(commandData.processDataValue)));
+								LOG_DEBUG("[TC]: TC Requests element: " +
+								          isobus::to_string(static_cast<int>(commandData.elementNumber)) +
+								          " DDI: " +
+								          isobus::to_string(static_cast<int>(commandData.ddi)) +
+								          " when it is above the raw value: " +
+								          isobus::to_string(static_cast<int>(commandData.processDataValue)));
 							}
 							else
 							{
@@ -1696,28 +1685,26 @@ namespace isobus
 						case ProcessDataCommands::MeasurementMinimumWithinThreshold:
 						{
 							ProcessDataCallbackInfo commandData = { 0, 0, 0, 0, false, false };
-#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
-							const std::lock_guard<std::mutex> lock(parentTC->clientMutex);
-#endif
+							LOCK_GUARD(Mutex, clientMutex);
 
 							commandData.elementNumber = (static_cast<std::uint16_t>(messageData[0] >> 4) | (static_cast<std::uint16_t>(messageData[1]) << 4));
 							commandData.ddi = static_cast<std::uint16_t>(messageData[2]) |
 							  (static_cast<std::uint16_t>(messageData[3]) << 8);
-							commandData.processDataValue = (static_cast<std::uint32_t>(messageData[4]) |
-							                                (static_cast<std::uint16_t>(messageData[5]) << 8) |
-							                                (static_cast<std::uint16_t>(messageData[6]) << 16) |
-							                                (static_cast<std::uint16_t>(messageData[7]) << 24));
+							commandData.processDataValue = (static_cast<std::int32_t>(messageData[4]) |
+							                                (static_cast<std::int32_t>(messageData[5]) << 8) |
+							                                (static_cast<std::int32_t>(messageData[6]) << 16) |
+							                                (static_cast<std::int32_t>(messageData[7]) << 24));
 
 							auto previousCommand = std::find(parentTC->measurementMinimumThresholdCommands.begin(), parentTC->measurementMinimumThresholdCommands.end(), commandData);
 							if (parentTC->measurementMinimumThresholdCommands.end() == previousCommand)
 							{
 								parentTC->measurementMinimumThresholdCommands.push_back(commandData);
-								CANStackLogger::debug("[TC]: TC Requests Element " +
-								                      isobus::to_string(static_cast<int>(commandData.elementNumber)) +
-								                      " DDI: " +
-								                      isobus::to_string(static_cast<int>(commandData.ddi)) +
-								                      " when it is below the raw value: " +
-								                      isobus::to_string(static_cast<int>(commandData.processDataValue)));
+								LOG_DEBUG("[TC]: TC Requests Element " +
+								          isobus::to_string(static_cast<int>(commandData.elementNumber)) +
+								          " DDI: " +
+								          isobus::to_string(static_cast<int>(commandData.ddi)) +
+								          " when it is below the raw value: " +
+								          isobus::to_string(static_cast<int>(commandData.processDataValue)));
 							}
 							else
 							{
@@ -1731,28 +1718,26 @@ namespace isobus
 						case ProcessDataCommands::MeasurementChangeThreshold:
 						{
 							ProcessDataCallbackInfo commandData = { 0, 0, 0, 0, false, false };
-#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
-							const std::lock_guard<std::mutex> lock(parentTC->clientMutex);
-#endif
+							LOCK_GUARD(Mutex, clientMutex);
 
 							commandData.elementNumber = (static_cast<std::uint16_t>(messageData[0] >> 4) | (static_cast<std::uint16_t>(messageData[1]) << 4));
 							commandData.ddi = static_cast<std::uint16_t>(messageData[2]) |
 							  (static_cast<std::uint16_t>(messageData[3]) << 8);
-							commandData.processDataValue = (static_cast<std::uint32_t>(messageData[4]) |
-							                                (static_cast<std::uint16_t>(messageData[5]) << 8) |
-							                                (static_cast<std::uint16_t>(messageData[6]) << 16) |
-							                                (static_cast<std::uint16_t>(messageData[7]) << 24));
+							commandData.processDataValue = (static_cast<std::int32_t>(messageData[4]) |
+							                                (static_cast<std::int32_t>(messageData[5]) << 8) |
+							                                (static_cast<std::int32_t>(messageData[6]) << 16) |
+							                                (static_cast<std::int32_t>(messageData[7]) << 24));
 
 							auto previousCommand = std::find(parentTC->measurementOnChangeThresholdCommands.begin(), parentTC->measurementOnChangeThresholdCommands.end(), commandData);
 							if (parentTC->measurementOnChangeThresholdCommands.end() == previousCommand)
 							{
 								parentTC->measurementOnChangeThresholdCommands.push_back(commandData);
-								CANStackLogger::debug("[TC]: TC Requests element " +
-								                      isobus::to_string(static_cast<int>(commandData.elementNumber)) +
-								                      " DDI: " +
-								                      isobus::to_string(static_cast<int>(commandData.ddi)) +
-								                      " on change by at least: " +
-								                      isobus::to_string(static_cast<int>(commandData.processDataValue)));
+								LOG_DEBUG("[TC]: TC Requests element " +
+								          isobus::to_string(static_cast<int>(commandData.elementNumber)) +
+								          " DDI: " +
+								          isobus::to_string(static_cast<int>(commandData.ddi)) +
+								          " on change by at least: " +
+								          isobus::to_string(static_cast<int>(commandData.processDataValue)));
 							}
 							else
 							{
@@ -1767,14 +1752,14 @@ namespace isobus
 						{
 							if (0 != messageData[4])
 							{
-								CANStackLogger::warn("[TC]: TC sent us a PDNACK");
+								LOG_WARNING("[TC]: TC sent us a PDNACK");
 							}
 						}
 						break;
 
 						default:
 						{
-							CANStackLogger::warn("[TC]: Unhandled process data message!");
+							LOG_WARNING("[TC]: Unhandled process data message!");
 						}
 						break;
 					}
@@ -1838,7 +1823,7 @@ namespace isobus
 		}
 		else
 		{
-			CANStackLogger::error("[TC]: DDOP internal data callback received out of range request.");
+			LOG_ERROR("[TC]: DDOP internal data callback received out of range request.");
 		}
 		return retVal;
 	}
@@ -1864,7 +1849,7 @@ namespace isobus
 				}
 				else
 				{
-					CANStackLogger::error("[TC]: DDOP upload did not complete. Resetting.");
+					LOG_ERROR("[TC]: DDOP upload did not complete. Resetting.");
 					parent->set_state(StateMachineState::Disconnected);
 				}
 			}
@@ -2017,7 +2002,7 @@ namespace isobus
 		                                                      partnerControlFunction);
 	}
 
-	bool TaskControllerClient::send_value_command(std::uint16_t elementNumber, std::uint16_t ddi, std::uint32_t value) const
+	bool TaskControllerClient::send_value_command(std::uint16_t elementNumber, std::uint16_t ddi, std::int32_t value) const
 	{
 		const std::array<std::uint8_t, CAN_DATA_LENGTH> buffer = { static_cast<std::uint8_t>(static_cast<std::uint8_t>(ProcessDataCommands::Value) |
 			                                                                                   (static_cast<std::uint8_t>(elementNumber & 0x0F) << 4)),
@@ -2090,6 +2075,23 @@ namespace isobus
 		currentState = newState;
 	}
 
+	void TaskControllerClient::select_language_command_partner()
+	{
+		if (serverVersion < static_cast<std::uint8_t>(Version::SecondPublishedEdition))
+		{
+			if (nullptr == primaryVirtualTerminal)
+			{
+				languageCommandInterface.set_partner(nullptr); // TC might not reply and no VT specified, so just see if anyone knows.
+				LOG_WARNING("[TC]: The TC is < version 4 but no VT was provided. Language data will be requested globally, which might not be ideal.");
+			}
+			else
+			{
+				languageCommandInterface.set_partner(primaryVirtualTerminal);
+				LOG_DEBUG("[TC]: Using VT as the partner for language data, because the TC's version is less than 4.");
+			}
+		}
+	}
+
 	void TaskControllerClient::worker_thread_function()
 	{
 #if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
@@ -2149,9 +2151,7 @@ namespace isobus
 	void TaskControllerClient::on_value_changed_trigger(std::uint16_t elementNumber, std::uint16_t DDI)
 	{
 		ProcessDataCallbackInfo requestData = { 0, 0, 0, 0, false, false };
-#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
-		const std::lock_guard<std::mutex> lock(clientMutex);
-#endif
+		LOCK_GUARD(Mutex, clientMutex);
 
 		requestData.ackRequested = false;
 		requestData.elementNumber = elementNumber;
